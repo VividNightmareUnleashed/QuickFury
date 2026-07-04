@@ -1,0 +1,11 @@
+{
+  "name": "com.quickfury.addon",
+  "displayName": "QuickFury",
+  "version": "1.0.0",
+  "unity": "2022.3",
+  "description": "Bolt-on build performance addon for VRCFury. Profiles and speeds up VRCFury avatar bakes without modifying VRCFury itself.",
+  "license": "MIT",
+  "author": {
+    "name": "Vivid Nightmare"
+  }
+}

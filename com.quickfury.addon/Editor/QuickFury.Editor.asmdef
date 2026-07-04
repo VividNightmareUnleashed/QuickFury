@@ -1,0 +1,29 @@
+{
+  "name": "QuickFury.Editor",
+  "rootNamespace": "QuickFury",
+  "references": [],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "0Harmony.dll",
+    "System.Collections.Immutable.dll",
+    "VRC.Dynamics.dll",
+    "VRC.SDK3.Dynamics.PhysBone.dll"
+  ],
+  "autoReferenced": false,
+  "defineConstraints": [
+    "QUICKFURY_HAS_VRCSDK"
+  ],
+  "versionDefines": [
+    {
+      "name": "com.vrchat.avatars",
+      "expression": "",
+      "define": "QUICKFURY_HAS_VRCSDK"
+    }
+  ],
+  "noEngineReferences": false
+}
