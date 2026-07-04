@@ -1,11 +1,11 @@
 # QuickFury
 
-Bolt-on build performance addon for [VRCFury](https://vrcfury.com). QuickFury profiles and speeds
-up VRCFury avatar bakes (play mode, test copies, and uploads) **without modifying or forking
-VRCFury** — it hooks VRCFury's build pipeline at runtime using Harmony, the same mechanism VRCFury
-itself uses to patch Unity and the VRCSDK. Delete the folder and everything is back to stock.
+QuickFury profiles and speeds up VRCFury avatar bakes (play mode, test copies, and uploads). It
+hooks VRCFury's build pipeline at runtime using Harmony, the same mechanism VRCFury itself uses to
+patch Unity and the VRCSDK. Delete the folder and everything is back to stock.
 
-Built for **Unity 2022.3** with the VRChat Avatars SDK and any recent VRCFury.
+Built for Unity 2022.3. Latest VRCFury version tested: **1.1348.0** — newer versions should work
+too; any patch that no longer matches your VRCFury is skipped safely and that code path runs stock.
 
 ## Results
 
