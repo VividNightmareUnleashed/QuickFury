@@ -1,0 +1,661 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
+using System.Security.Cryptography;
+using System.Text;
+using HarmonyLib;
+using UnityEditor;
+using UnityEditor.Animations;
+using UnityEngine;
+using Object = UnityEngine.Object;
+using Stopwatch = System.Diagnostics.Stopwatch;
+
+namespace QuickFury {
+    /// <summary>
+    /// Replaces SaveAssetsSession's SerializedObject walk for AnimatorControllers with a
+    /// traversal of Unity's public controller graph. This reaches the same states, state
+    /// machines, transitions, behaviours, motions and masks without inspecting every
+    /// serialized property on every node.
+    /// </summary>
+    internal static class FastControllerAssetGraphPatch {
+        private static MethodInfo didCreate;
+        private static MethodInfo getUseOriginalClip;
+        private static MethodInfo getClipExt;
+        private static MethodInfo finalizeClip;
+        private static MethodInfo rewriteInternals;
+        private static FieldInfo extCurves;
+        private static FieldInfo extOriginalSourceClip;
+        private static PropertyInfo curveIsFloat;
+        private static PropertyInfo curveFloatCurve;
+        private static PropertyInfo curveObjectCurve;
+        [ThreadStatic] private static HashSet<Object> savedOrScheduled;
+        [ThreadStatic] private static long lastStatsTicks;
+        internal static string LastStats { get; private set; } = "none";
+
+        internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
+            var sessionType = VrcfuryCompatibility.FindType("VF.Utils.SaveAssetsSession");
+            var getUnsavedChildren = sessionType?
+                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .SingleOrDefault(method => {
+                    if (method.Name != "GetUnsavedChildren") return false;
+                    var parameters = method.GetParameters();
+                    return parameters.Length == 3
+                           && parameters[0].ParameterType == typeof(Object)
+                           && parameters[1].ParameterType == typeof(bool)
+                           && parameters[2].ParameterType == typeof(bool);
+                });
+
+            var factoryType = VrcfuryCompatibility.FindType("VF.Utils.VrcfObjectFactory");
+            didCreate = factoryType?
+                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .SingleOrDefault(method => method.Name == "DidCreate"
+                                           && method.ReturnType == typeof(bool)
+                                           && method.GetParameters().Length == 1);
+
+            var clipExtensions = VrcfuryCompatibility.FindType("VF.Utils.AnimationClipExtensions");
+            getUseOriginalClip = clipExtensions?
+                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .SingleOrDefault(method => method.Name == "GetUseOriginalUserClip"
+                                           && method.ReturnType == typeof(AnimationClip)
+                                           && method.GetParameters().Length == 1);
+            getClipExt = clipExtensions?
+                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .SingleOrDefault(method => method.Name == "GetExt"
+                                           && method.GetParameters().Length == 1
+                                           && method.GetParameters()[0].ParameterType == typeof(AnimationClip));
+            finalizeClip = clipExtensions?
+                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .SingleOrDefault(method => method.Name == "FinalizeAsset"
+                                           && method.ReturnType == typeof(void)
+                                           && method.GetParameters().Length == 2);
+
+            var clipExtType = getClipExt?.ReturnType;
+            extCurves = clipExtType?.GetField(
+                "curves",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+            );
+            extOriginalSourceClip = clipExtType?.GetField(
+                "originalSourceClip",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+            );
+            var curveType = VrcfuryCompatibility.FindType("VF.Utils.FloatOrObjectCurve");
+            curveIsFloat = curveType?.GetProperty(
+                "IsFloat",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+            );
+            curveFloatCurve = curveType?.GetProperty(
+                "FloatCurve",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+            );
+            curveObjectCurve = curveType?.GetProperty(
+                "ObjectCurve",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+            );
+
+            var mutableManager = VrcfuryCompatibility.FindType("VF.Utils.MutableManager");
+            rewriteInternals = mutableManager?
+                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .SingleOrDefault(method => method.Name == "RewriteInternals"
+                                           && method.ReturnType == typeof(void)
+                                           && method.GetParameters().Length == 2);
+
+            var saveAssetsType = compatibility.AvatarEditorAssembly.GetType("VF.Service.SaveAssetsService", false);
+            var saveAssetsRun = saveAssetsType?
+                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .SingleOrDefault(method => method.Name == "Run"
+                                           && method.ReturnType == typeof(void)
+                                           && method.GetParameters().Length == 0);
+            var assetDatabaseType = VrcfuryCompatibility.FindType("VF.Utils.VRCFuryAssetDatabase");
+            var saveMethods = assetDatabaseType?
+                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .Where(method => (method.Name == "SaveAsset" || method.Name == "AttachAsset")
+                                 && method.GetParameters().Length >= 2
+                                 && method.GetParameters()[0].ParameterType == typeof(Object))
+                .ToArray() ?? Array.Empty<MethodInfo>();
+
+            if (getUnsavedChildren == null || didCreate == null || getUseOriginalClip == null
+                                           || getClipExt == null || finalizeClip == null
+                                           || extCurves == null || extOriginalSourceClip == null
+                                           || curveIsFloat == null || curveFloatCurve == null
+                                           || curveObjectCurve == null || rewriteInternals == null
+                                           || saveAssetsRun == null || saveMethods.Length < 3) {
+                Debug.LogWarning(
+                    "[QuickFury] Fast controller asset graph disabled: expected VRCFury members were not found."
+                );
+                return;
+            }
+
+            try {
+                harmony.Patch(
+                    getUnsavedChildren,
+                    prefix: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(Prefix))
+                );
+                harmony.Patch(
+                    saveAssetsRun,
+                    prefix: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(BeginSaveRun)),
+                    finalizer: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(EndSaveRun))
+                );
+                foreach (var method in saveMethods) {
+                    harmony.Patch(
+                        method,
+                        postfix: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(AssetSaved))
+                    );
+                }
+            } catch (Exception e) {
+                Debug.LogWarning("[QuickFury] Fast controller asset graph disabled: " + e.Message);
+            }
+        }
+
+        private static void BeginSaveRun() {
+            savedOrScheduled = new HashSet<Object>();
+            lastStatsTicks = 0;
+        }
+
+        private static Exception EndSaveRun(Exception __exception) {
+            savedOrScheduled = null;
+            return __exception;
+        }
+
+        private static void AssetSaved(Object __0) {
+            if (__0 != null) savedOrScheduled?.Add(__0);
+        }
+
+        private static bool Prefix(
+            Object obj,
+            bool recurse,
+            bool reuseOriginalClips,
+            ref IList<Object> __result
+        ) {
+            if (!QuickFurySettings.FastControllerAssetGraph || !recurse) {
+                return true;
+            }
+
+            try {
+                if (obj is AnimatorController controller) {
+                    __result = Collect(controller, reuseOriginalClips);
+                    return false;
+                }
+                if (obj is Material material) {
+                    __result = CollectMaterialChildren(material);
+                    return false;
+                }
+                return true;
+            } catch (Exception e) {
+                Debug.LogWarning("[QuickFury] Fast asset graph fell back to VRCFury: " + e.Message);
+                return true;
+            }
+        }
+
+        private static IList<Object> CollectMaterialChildren(Material material) {
+            var output = new List<Object>();
+            var seen = new HashSet<Object>();
+            foreach (var property in material.GetTexturePropertyNames()) {
+                var texture = material.GetTexture(property);
+                if (texture == null || !seen.Add(texture) || !DidCreate(texture)) continue;
+                if (savedOrScheduled != null && savedOrScheduled.Contains(texture)) continue;
+                if (string.IsNullOrEmpty(AssetDatabase.GetAssetPath(texture))) output.Add(texture);
+            }
+            return output;
+        }
+
+        private static IList<Object> Collect(AnimatorController controller, bool reuseOriginalClips) {
+            long includeTicks = 0;
+            long pushTicks = 0;
+            long dependencyTicks = 0;
+            long rewriteTicks = 0;
+            long settingsTicks = 0;
+            long didCreateTicks = 0;
+            long originalClipTicks = 0;
+            long finalizeClipTicks = 0;
+            long deduplicateClipTicks = 0;
+            var clipCount = 0;
+            var deduplicatedClips = 0;
+            var output = new List<Object>();
+            var visited = new HashSet<Object>();
+            var stack = new Stack<Object>();
+            var clipReplacements = new Dictionary<Object, Object>();
+            var generatedClipByContent = new Dictionary<string, AnimationClip>();
+            var nativeDependencyRoots = new List<Object>();
+            var nativeDependencies = new HashSet<Object>();
+            var clipDependencies = new Dictionary<AnimationClip, List<Object>>();
+            var rootPath = AssetDatabase.GetAssetPath(controller);
+            if (savedOrScheduled != null && !string.IsNullOrEmpty(rootPath)) {
+                // Load the controller file's existing subassets once. Querying
+                // GetAssetPath separately for thousands of graph nodes costs seconds.
+                foreach (var existing in AssetDatabase.LoadAllAssetsAtPath(rootPath)) {
+                    if (existing != null) savedOrScheduled.Add(existing);
+                }
+                // The root itself must still be traversed so newly appended graph nodes
+                // can be discovered during a later preprocessor hook.
+                savedOrScheduled.Remove(controller);
+            }
+            stack.Push(controller);
+
+            bool Include(Object current) {
+                if (current == controller) return true;
+                var timed = Stopwatch.GetTimestamp();
+                var created = DidCreate(current);
+                didCreateTicks += Stopwatch.GetTimestamp() - timed;
+                if (!created) return false;
+
+                var known = savedOrScheduled;
+                // Persisted controller nodes still need their outgoing references
+                // traversed: a later preprocessor hook can append a fresh child to an
+                // already-saved state, behaviour or blend tree.
+                if (known != null && known.Contains(current)) return true;
+
+                // Outside a SaveAssets run retain VRCFury's normal persistence check.
+                // During a run, saved/scheduled objects are tracked in-memory and an
+                // adopted controller's existing subassets were loaded above in bulk.
+                if (known == null && !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(current))) {
+                    return true;
+                }
+
+                if (current is AnimationClip clip) {
+                    clipCount++;
+                    if (reuseOriginalClips) {
+                        timed = Stopwatch.GetTimestamp();
+                        var original = InvokeUnwrapped(
+                            getUseOriginalClip,
+                            null,
+                            new object[] { clip }
+                        ) as AnimationClip;
+                        originalClipTicks += Stopwatch.GetTimestamp() - timed;
+                        if (original != null) {
+                            clipReplacements[clip] = original;
+                            return false;
+                        }
+                    }
+                    if (QuickFurySettings.DeduplicateGeneratedClips) {
+                        timed = Stopwatch.GetTimestamp();
+                        var contentKey = GetGeneratedClipContentKey(clip);
+                        deduplicateClipTicks += Stopwatch.GetTimestamp() - timed;
+                        if (contentKey != null) {
+                            if (generatedClipByContent.TryGetValue(contentKey, out var canonical)) {
+                                clipReplacements[clip] = canonical;
+                                deduplicatedClips++;
+                                return false;
+                            }
+                            generatedClipByContent.Add(contentKey, clip);
+                        }
+                    }
+                    timed = Stopwatch.GetTimestamp();
+                    InvokeUnwrapped(finalizeClip, null, new object[] { clip, true });
+                    finalizeClipTicks += Stopwatch.GetTimestamp() - timed;
+                }
+                known?.Add(current);
+                output.Add(current);
+                return true;
+            }
+
+            while (stack.Count > 0) {
+                var current = stack.Pop();
+                if (current == null || !visited.Add(current)) continue;
+                var started = Stopwatch.GetTimestamp();
+                var shouldTraverse = Include(current);
+                includeTicks += Stopwatch.GetTimestamp() - started;
+                if (!shouldTraverse) continue;
+                started = Stopwatch.GetTimestamp();
+                PushChildren(current, stack, nativeDependencyRoots, clipDependencies);
+                pushTicks += Stopwatch.GetTimestamp() - started;
+            }
+
+            // CollectDependencies is recursive. One batched native traversal handles the
+            // arbitrary serialized fields on all StateMachineBehaviours. AnimationClip
+            // dependencies are enumerated precisely through AnimationUtility above.
+            if (nativeDependencyRoots.Count > 0) {
+                var started = Stopwatch.GetTimestamp();
+                foreach (var dependency in EditorUtility.CollectDependencies(
+                             nativeDependencyRoots.Distinct().ToArray()
+                         )) {
+                    if (dependency != null) nativeDependencies.Add(dependency);
+                    if (dependency == null || !visited.Add(dependency)) continue;
+                    Include(dependency);
+                }
+                dependencyTicks += Stopwatch.GetTimestamp() - started;
+            }
+
+            if (clipReplacements.Count > 0) {
+                var started = Stopwatch.GetTimestamp();
+                RewriteMotions(output, clipReplacements);
+                RewriteClipReferences(
+                    output.OfType<AnimationClip>().Where(clip =>
+                        clipDependencies.TryGetValue(clip, out var dependencies)
+                        && dependencies.Any(clipReplacements.ContainsKey)
+                    ),
+                    clipReplacements
+                );
+
+                // VRC state behaviours can contain arbitrary user object fields. Preserve
+                // VRCFury's generic rewrite only when the batched dependency graph proves
+                // that at least one behaviour can reach a replaced clip.
+                if (nativeDependencies.Any(clipReplacements.ContainsKey)) {
+                    foreach (var behaviour in output.OfType<StateMachineBehaviour>()) {
+                        InvokeUnwrapped(
+                            rewriteInternals,
+                            null,
+                            new object[] { behaviour, clipReplacements }
+                        );
+                    }
+                }
+                rewriteTicks += Stopwatch.GetTimestamp() - started;
+            }
+
+            var settingsStarted = Stopwatch.GetTimestamp();
+            foreach (var clip in output.OfType<AnimationClip>()) {
+                AnimationUtility.SetAnimationClipSettings(
+                    clip,
+                    AnimationUtility.GetAnimationClipSettings(clip)
+                );
+            }
+            settingsTicks += Stopwatch.GetTimestamp() - settingsStarted;
+
+            var measuredTicks = includeTicks + pushTicks + dependencyTicks + rewriteTicks + settingsTicks;
+            if (measuredTicks > lastStatsTicks) {
+                lastStatsTicks = measuredTicks;
+                LastStats = $"visited={visited.Count},output={output.Count},nativeRoots={nativeDependencyRoots.Count}," +
+                            $"includeMs={ToMilliseconds(includeTicks):F1},pushMs={ToMilliseconds(pushTicks):F1}," +
+                            $"depsMs={ToMilliseconds(dependencyTicks):F1},rewriteMs={ToMilliseconds(rewriteTicks):F1}," +
+                            $"settingsMs={ToMilliseconds(settingsTicks):F1},clips={clipCount}," +
+                            $"didCreateMs={ToMilliseconds(didCreateTicks):F1}," +
+                            $"originalClipMs={ToMilliseconds(originalClipTicks):F1}," +
+                            $"finalizeClipMs={ToMilliseconds(finalizeClipTicks):F1}," +
+                            $"dedupKeyMs={ToMilliseconds(deduplicateClipTicks):F1}," +
+                            $"deduplicated={deduplicatedClips}," +
+                            $"replacements={clipReplacements.Count}";
+            }
+
+            return output;
+        }
+
+        private static string GetGeneratedClipContentKey(AnimationClip clip) {
+            var ext = InvokeUnwrapped(getClipExt, null, new object[] { clip });
+            if (ext == null) return null;
+
+            // Modified copies of user clips need their original Euler rotation-order
+            // repair in FinalizeAsset. Keep those distinct for now; brand-new clips
+            // point originalSourceClip back to themselves and are safe to canonicalize.
+            var originalSource = extOriginalSourceClip.GetValue(ext) as AnimationClip;
+            if (!ReferenceEquals(originalSource, clip)) return null;
+            if (!(extCurves.GetValue(ext) is IDictionary curves)) return null;
+
+            var builder = new StringBuilder();
+            builder.Append("clip|")
+                .Append(Float(clip.frameRate)).Append('|')
+                .Append(clip.legacy).Append('|')
+                .Append(clip.wrapMode).Append('|');
+            AppendBounds(builder, clip.localBounds);
+
+            var settings = AnimationUtility.GetAnimationClipSettings(clip);
+            foreach (var property in settings.GetType()
+                         .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                         .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
+                         .OrderBy(property => property.Name, StringComparer.Ordinal)) {
+                builder.Append("setting|").Append(property.Name).Append('|')
+                    .Append(Value(property.GetValue(settings, null))).AppendLine();
+            }
+
+            foreach (var animationEvent in AnimationUtility.GetAnimationEvents(clip)) {
+                builder.Append("event|").Append(Float(animationEvent.time)).Append('|')
+                    .Append(animationEvent.functionName).Append('|')
+                    .Append(Float(animationEvent.floatParameter)).Append('|')
+                    .Append(animationEvent.intParameter).Append('|')
+                    .Append(animationEvent.stringParameter).Append('|')
+                    .Append(ObjectId(animationEvent.objectReferenceParameter)).Append('|')
+                    .Append(animationEvent.messageOptions).AppendLine();
+            }
+
+            var entries = new List<(EditorCurveBinding Binding, object Curve)>();
+            foreach (DictionaryEntry entry in curves) {
+                if (!(entry.Key is EditorCurveBinding binding) || entry.Value == null) return null;
+                entries.Add((binding, entry.Value));
+            }
+            foreach (var entry in entries
+                         .OrderBy(value => value.Binding.path, StringComparer.Ordinal)
+                         .ThenBy(value => value.Binding.type?.AssemblyQualifiedName, StringComparer.Ordinal)
+                         .ThenBy(value => value.Binding.propertyName, StringComparer.Ordinal)
+                         .ThenBy(value => value.Binding.isPPtrCurve)
+                         .ThenBy(value => value.Binding.isDiscreteCurve)) {
+                var binding = entry.Binding;
+                var curve = entry.Curve;
+                var isFloat = (bool)curveIsFloat.GetValue(curve, null);
+                builder.Append(isFloat ? "float|" : "object|")
+                    .Append(binding.path).Append('|')
+                    .Append(binding.type?.AssemblyQualifiedName).Append('|')
+                    .Append(binding.propertyName).Append('|')
+                    .Append(binding.isPPtrCurve).Append('|')
+                    .Append(binding.isDiscreteCurve).AppendLine();
+
+                if (isFloat) {
+                    var animationCurve = curveFloatCurve.GetValue(curve, null) as AnimationCurve;
+                    if (animationCurve == null) return null;
+                    builder.Append("wrap|").Append(animationCurve.preWrapMode).Append('|')
+                        .Append(animationCurve.postWrapMode).AppendLine();
+                    foreach (var key in animationCurve.keys) {
+                        builder.Append("key|").Append(Float(key.time)).Append('|')
+                            .Append(Float(key.value)).Append('|')
+                            .Append(Float(key.inTangent)).Append('|')
+                            .Append(Float(key.outTangent)).Append('|')
+                            .Append(Float(key.inWeight)).Append('|')
+                            .Append(Float(key.outWeight)).Append('|')
+                            .Append(key.weightedMode).AppendLine();
+                    }
+                } else {
+                    var objectCurve = curveObjectCurve.GetValue(curve, null) as ObjectReferenceKeyframe[];
+                    if (objectCurve == null) return null;
+                    foreach (var key in objectCurve) {
+                        builder.Append("key|").Append(Float(key.time)).Append('|')
+                            .Append(ObjectId(key.value)).AppendLine();
+                    }
+                }
+            }
+
+            using (var hash = SHA256.Create()) {
+                return string.Concat(
+                    hash.ComputeHash(Encoding.UTF8.GetBytes(builder.ToString()))
+                        .Select(value => value.ToString("X2"))
+                );
+            }
+        }
+
+        private static string Float(float value) {
+            return value.ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        private static string Value(object value) {
+            if (value == null) return "<null>";
+            if (value is Object unityObject) return ObjectId(unityObject);
+            if (value is IFormattable formatted) {
+                return formatted.ToString(null, CultureInfo.InvariantCulture);
+            }
+            return value.ToString();
+        }
+
+        private static string ObjectId(Object value) {
+            if (value == null) return "<null>";
+            if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(value, out string guid, out long localId)) {
+                return guid + ":" + localId;
+            }
+            return "instance:" + value.GetInstanceID();
+        }
+
+        private static void AppendBounds(StringBuilder builder, Bounds bounds) {
+            builder.Append(Float(bounds.center.x)).Append(',')
+                .Append(Float(bounds.center.y)).Append(',')
+                .Append(Float(bounds.center.z)).Append('|')
+                .Append(Float(bounds.extents.x)).Append(',')
+                .Append(Float(bounds.extents.y)).Append(',')
+                .Append(Float(bounds.extents.z)).AppendLine();
+        }
+
+        private static double ToMilliseconds(long ticks) {
+            return ticks * 1000.0 / Stopwatch.Frequency;
+        }
+
+        private static void PushChildren(
+            Object current,
+            Stack<Object> stack,
+            List<Object> nativeDependencyRoots,
+            Dictionary<AnimationClip, List<Object>> clipDependencies
+        ) {
+            switch (current) {
+                case AnimatorController controller:
+                    foreach (var layer in controller.layers.Reverse()) {
+                        stack.Push(layer.avatarMask);
+                        stack.Push(layer.stateMachine);
+                    }
+                    break;
+
+                case AnimatorStateMachine stateMachine:
+                    foreach (var behaviour in stateMachine.behaviours.Reverse()) stack.Push(behaviour);
+                    foreach (var transition in stateMachine.entryTransitions.Reverse()) stack.Push(transition);
+                    foreach (var transition in stateMachine.anyStateTransitions.Reverse()) stack.Push(transition);
+                    foreach (var child in stateMachine.stateMachines.Reverse()) {
+                        foreach (var transition in stateMachine.GetStateMachineTransitions(child.stateMachine).Reverse()) {
+                            stack.Push(transition);
+                        }
+                        stack.Push(child.stateMachine);
+                    }
+                    foreach (var child in stateMachine.states.Reverse()) stack.Push(child.state);
+                    stack.Push(stateMachine.defaultState);
+                    break;
+
+                case AnimatorState state:
+                    foreach (var behaviour in state.behaviours.Reverse()) stack.Push(behaviour);
+                    foreach (var transition in state.transitions.Reverse()) stack.Push(transition);
+                    stack.Push(state.motion);
+                    break;
+
+                case BlendTree tree:
+                    foreach (var child in tree.children.Reverse()) stack.Push(child.motion);
+                    break;
+
+                case AnimatorTransitionBase transition:
+                    stack.Push(transition.destinationStateMachine);
+                    stack.Push(transition.destinationState);
+                    break;
+
+                case StateMachineBehaviour behaviour:
+                    nativeDependencyRoots.Add(behaviour);
+                    break;
+
+                case AnimationClip clip:
+                    PushClipDependencies(clip, stack, clipDependencies);
+                    break;
+            }
+        }
+
+        private static void PushClipDependencies(
+            AnimationClip clip,
+            Stack<Object> stack,
+            Dictionary<AnimationClip, List<Object>> clipDependencies
+        ) {
+            var dependencies = new List<Object>();
+            void Add(Object dependency) {
+                if (dependency == null) return;
+                dependencies.Add(dependency);
+                stack.Push(dependency);
+            }
+            foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(clip)) {
+                foreach (var keyframe in AnimationUtility.GetObjectReferenceCurve(clip, binding)) {
+                    Add(keyframe.value);
+                }
+            }
+            foreach (var animationEvent in AnimationUtility.GetAnimationEvents(clip)) {
+                Add(animationEvent.objectReferenceParameter);
+            }
+            var settings = AnimationUtility.GetAnimationClipSettings(clip);
+            Add(settings.additiveReferencePoseClip);
+            clipDependencies[clip] = dependencies;
+        }
+
+        private static void RewriteMotions(
+            IEnumerable<Object> objects,
+            IReadOnlyDictionary<Object, Object> replacements
+        ) {
+            foreach (var state in objects.OfType<AnimatorState>()) {
+                var rewritten = RewriteMotion(state.motion, replacements);
+                if (rewritten == state.motion) continue;
+                state.motion = rewritten;
+                EditorUtility.SetDirty(state);
+            }
+
+            foreach (var tree in objects.OfType<BlendTree>()) {
+                var children = tree.children;
+                var changed = false;
+                for (var i = 0; i < children.Length; i++) {
+                    var rewritten = RewriteMotion(children[i].motion, replacements);
+                    if (rewritten == children[i].motion) continue;
+                    children[i].motion = rewritten;
+                    changed = true;
+                }
+                if (!changed) continue;
+                tree.children = children;
+                EditorUtility.SetDirty(tree);
+            }
+        }
+
+        private static void RewriteClipReferences(
+            IEnumerable<AnimationClip> clips,
+            IReadOnlyDictionary<Object, Object> replacements
+        ) {
+            foreach (var clip in clips) {
+                foreach (var binding in AnimationUtility.GetObjectReferenceCurveBindings(clip)) {
+                    var keys = AnimationUtility.GetObjectReferenceCurve(clip, binding);
+                    var changed = false;
+                    for (var i = 0; i < keys.Length; i++) {
+                        if (keys[i].value == null
+                            || !replacements.TryGetValue(keys[i].value, out var replacement)) continue;
+                        keys[i].value = replacement;
+                        changed = true;
+                    }
+                    if (changed) AnimationUtility.SetObjectReferenceCurve(clip, binding, keys);
+                }
+
+                var events = AnimationUtility.GetAnimationEvents(clip);
+                var eventsChanged = false;
+                foreach (var animationEvent in events) {
+                    if (animationEvent.objectReferenceParameter == null
+                        || !replacements.TryGetValue(
+                            animationEvent.objectReferenceParameter,
+                            out var replacement
+                        )) continue;
+                    animationEvent.objectReferenceParameter = replacement;
+                    eventsChanged = true;
+                }
+                if (eventsChanged) AnimationUtility.SetAnimationEvents(clip, events);
+
+                var settings = AnimationUtility.GetAnimationClipSettings(clip);
+                if (settings.additiveReferencePoseClip != null
+                    && replacements.TryGetValue(settings.additiveReferencePoseClip, out var referenceReplacement)) {
+                    settings.additiveReferencePoseClip = referenceReplacement as AnimationClip;
+                    AnimationUtility.SetAnimationClipSettings(clip, settings);
+                }
+            }
+        }
+
+        private static Motion RewriteMotion(Motion motion, IReadOnlyDictionary<Object, Object> replacements) {
+            if (motion != null && replacements.TryGetValue(motion, out var replacement)) {
+                return replacement as Motion;
+            }
+            return motion;
+        }
+
+        private static bool DidCreate(Object obj) {
+            return (bool)InvokeUnwrapped(didCreate, null, new object[] { obj });
+        }
+
+        private static object InvokeUnwrapped(MethodInfo method, object instance, object[] args) {
+            try {
+                return method.Invoke(instance, args);
+            } catch (TargetInvocationException e) when (e.InnerException != null) {
+                ExceptionDispatchInfo.Capture(e.InnerException).Throw();
+                throw;
+            }
+        }
+    }
+}

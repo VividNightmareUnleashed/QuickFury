@@ -13,6 +13,7 @@ namespace QuickFury {
     /// </summary>
     internal static class ArmatureConstraintIndexPatch {
         private sealed class Entry {
+            internal int Order;
             internal object Wrapper;
             internal Component Component;
             internal Transform Affected;
@@ -20,12 +21,15 @@ namespace QuickFury {
 
         private sealed class Context {
             internal readonly List<Entry> Entries = new List<Entry>();
+            internal readonly Dictionary<int, List<Entry>> ByAffectedTransform =
+                new Dictionary<int, List<Entry>>();
         }
 
         [ThreadStatic] private static Context active;
 
         private static Type constraintType;
         private static FieldInfo avatarObjectField;
+        private static FieldInfo hapticAvatarObjectField;
         private static FieldInfo gameObjectField;
         private static MethodInfo createConstraint;
         private static MethodInfo getAffectedObject;
@@ -33,10 +37,14 @@ namespace QuickFury {
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
             var armatureType = VrcfuryCompatibility.FindType("VF.Service.ArmatureLinkService");
+            var hapticType = VrcfuryCompatibility.FindType("VF.Service.BakeHapticSocketsService");
             var vfGameObjectType = VrcfuryCompatibility.FindType("VF.Utils.VFGameObject");
             constraintType = VrcfuryCompatibility.FindType("VF.Utils.VFConstraint");
 
             var apply = armatureType?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .SingleOrDefault(method => method.Name == "Apply" && method.GetParameters().Length == 0);
+            var hapticApply = hapticType?
+                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .SingleOrDefault(method => method.Name == "Apply" && method.GetParameters().Length == 0);
             var getConstraints = vfGameObjectType?
                 .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
@@ -49,6 +57,10 @@ namespace QuickFury {
                 });
 
             avatarObjectField = armatureType?.GetField("avatarObject", BindingFlags.Instance | BindingFlags.NonPublic);
+            hapticAvatarObjectField = hapticType?.GetField(
+                "avatarObject",
+                BindingFlags.Instance | BindingFlags.NonPublic
+            );
             gameObjectField = vfGameObjectType?.GetField("_gameObject", BindingFlags.Instance | BindingFlags.NonPublic);
             createConstraint = constraintType?.GetMethod(
                 "CreateOrNull",
@@ -66,8 +78,9 @@ namespace QuickFury {
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
             );
 
-            if (apply == null || getConstraints == null || constraintType == null
-                              || avatarObjectField == null || gameObjectField == null
+            if (apply == null || hapticApply == null || getConstraints == null || constraintType == null
+                              || avatarObjectField == null || hapticAvatarObjectField == null
+                              || gameObjectField == null
                               || createConstraint == null || getAffectedObject == null
                               || getConstraintComponent == null) {
                 Debug.LogWarning("[QuickFury] Armature constraint index disabled: target signature mismatch.");
@@ -81,6 +94,11 @@ namespace QuickFury {
                     finalizer: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(End))
                 );
                 harmony.Patch(
+                    hapticApply,
+                    prefix: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(BeginHaptics)),
+                    finalizer: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(End))
+                );
+                harmony.Patch(
                     getConstraints,
                     prefix: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(GetConstraints))
                 );
@@ -90,11 +108,19 @@ namespace QuickFury {
         }
 
         private static void Begin(object __instance) {
+            BeginWithField(__instance, avatarObjectField);
+        }
+
+        private static void BeginHaptics(object __instance) {
+            BeginWithField(__instance, hapticAvatarObjectField);
+        }
+
+        private static void BeginWithField(object instance, FieldInfo avatarField) {
             active = null;
             if (!QuickFurySettings.ConstraintIndex) return;
 
             try {
-                var avatarWrapper = avatarObjectField.GetValue(__instance);
+                var avatarWrapper = avatarField.GetValue(instance);
                 var avatar = ArmatureReflection.GetGameObject(avatarWrapper, gameObjectField);
                 if (avatar == null) return;
 
@@ -109,11 +135,19 @@ namespace QuickFury {
                     var constraintComponent = getConstraintComponent.Invoke(wrapper, null) as Component;
                     if (affected == null || constraintComponent == null) continue;
 
-                    context.Entries.Add(new Entry {
+                    var entry = new Entry {
+                        Order = context.Entries.Count,
                         Wrapper = wrapper,
                         Component = constraintComponent,
                         Affected = affected
-                    });
+                    };
+                    context.Entries.Add(entry);
+                    var id = affected.GetInstanceID();
+                    if (!context.ByAffectedTransform.TryGetValue(id, out var bucket)) {
+                        bucket = new List<Entry>();
+                        context.ByAffectedTransform.Add(id, bucket);
+                    }
+                    bucket.Add(entry);
                 }
                 active = context;
             } catch (Exception e) {
@@ -140,26 +174,35 @@ namespace QuickFury {
             if (requestedObject == null) return true;
             var requested = requestedObject.transform;
 
-            var matches = new List<object>();
-            foreach (var entry in context.Entries) {
-                if (entry.Component == null || entry.Affected == null) continue;
-
-                bool match;
-                if (__0) {
-                    match = requested.IsChildOf(entry.Affected);
-                } else if (__1) {
-                    match = entry.Affected.IsChildOf(requested);
-                } else {
-                    match = entry.Affected == requested;
+            var entries = new List<Entry>();
+            if (__0) {
+                for (var current = requested; current != null; current = current.parent) {
+                    AddBucket(context, current, entries);
                 }
-
-                if (match) matches.Add(entry.Wrapper);
+            } else if (__1) {
+                foreach (var child in requested.GetComponentsInChildren<Transform>(true)) {
+                    AddBucket(context, child, entries);
+                }
+            } else {
+                AddBucket(context, requested, entries);
             }
 
-            var output = Array.CreateInstance(constraintType, matches.Count);
-            for (var i = 0; i < matches.Count; i++) output.SetValue(matches[i], i);
+            // The stock component scan is stable. Preserve that order even though the
+            // lookup above follows hierarchy ancestry/descendancy.
+            entries.RemoveAll(entry => entry.Component == null || entry.Affected == null);
+            entries.Sort((left, right) => left.Order.CompareTo(right.Order));
+
+            var output = Array.CreateInstance(constraintType, entries.Count);
+            for (var i = 0; i < entries.Count; i++) output.SetValue(entries[i].Wrapper, i);
             __result = output;
             return false;
+        }
+
+        private static void AddBucket(Context context, Transform transform, List<Entry> output) {
+            if (transform == null) return;
+            if (context.ByAffectedTransform.TryGetValue(transform.GetInstanceID(), out var bucket)) {
+                output.AddRange(bucket);
+            }
         }
     }
 }

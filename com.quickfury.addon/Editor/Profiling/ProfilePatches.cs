@@ -86,7 +86,17 @@ namespace QuickFury {
             }),
             ("VF.Utils.MutableManager", new[] {
                 "ForEachChild", "ForEachChildObjectReference", "RewriteInternals"
-            })
+            }),
+            ("VF.Inspector.VRCFuryHapticSocketEditor", new[] { "Bake" }),
+            ("VF.Builder.Haptics.SpsUpgrader", new[] { "Apply" }),
+            ("VF.Service.HapticContactsService", new[] { "AddReceiver" }),
+            ("VF.Service.HapticAnimContactsService", new[] { "CreateAnims" }),
+            ("VF.Builder.Haptics.PlugSizeDetector", new[] { "GetAutoWorldSize" }),
+            ("VF.Builder.MeshBaker", new[] { "BakeMesh" }),
+            ("VF.Inspector.VRCFuryHapticPlugEditor", new[] { "GetRenderers" }),
+            ("VF.Builder.Haptics.TpsConfigurer", new[] { "HasDpsOrTpsMaterial" }),
+            ("VF.Builder.Haptics.PlugRendererFinder", new[] { "GetAutoRenderer" }),
+            ("VF.Builder.Haptics.PlugMaskGenerator", new[] { "GetMask" })
         };
 
         private static void RunPrefix() {
@@ -135,8 +145,12 @@ namespace QuickFury {
         private static void MethodPrefix(MethodBase __originalMethod) {
             if (!active || !QuickFurySettings.DetailedProfiling) return;
 
+            var key = __originalMethod.DeclaringType?.Name + "." + __originalMethod.Name;
+            if (actionFrames != null && actionFrames.Count > 0) {
+                key = actionFrames.Peek().Key + " > " + key;
+            }
             methodFrames.Push(new Frame {
-                Key = __originalMethod.DeclaringType?.Name + "." + __originalMethod.Name,
+                Key = key,
                 Started = Stopwatch.GetTimestamp()
             });
         }
@@ -147,12 +161,14 @@ namespace QuickFury {
             }
 
             var expected = __originalMethod.DeclaringType?.Name + "." + __originalMethod.Name;
+            if (actionFrames != null && actionFrames.Count > 0) {
+                expected = actionFrames.Peek().Key + " > " + expected;
+            }
             var frame = methodFrames.Pop();
             if (frame.Key != expected) {
                 methodFrames.Clear();
                 return __exception;
             }
-
             var elapsed = Stopwatch.GetTimestamp() - frame.Started;
             var self = Math.Max(0, elapsed - frame.ChildTicks);
             Add(Methods, frame.Key, elapsed, self);
@@ -180,6 +196,9 @@ namespace QuickFury {
                 $"[QuickFury] VRCFury profile: {ToMilliseconds(elapsedTicks):F3} ms total" +
                 (exception == null ? "" : $" (failed: {exception.GetType().Name})")
             );
+            if (exception != null) {
+                builder.AppendLine("Failure: " + FormatException(exception));
+            }
             builder.AppendLine("Top actions (exact call duration):");
             AppendAggregates(builder, Actions, 40);
 
@@ -195,12 +214,35 @@ namespace QuickFury {
                 $"physboneIndex={QuickFurySettings.PhysboneIndex}, " +
                 $"skinIndex={QuickFurySettings.SkinIndex}, " +
                 $"destroyIndex={QuickFurySettings.DestroyIndex}, " +
+                $"skipArmatureDebugInfo={QuickFurySettings.SkipArmatureDebugInfo}, " +
+                $"fastArmatureMove={QuickFurySettings.FastArmatureMove}, " +
                 $"layerIndex={QuickFurySettings.LayerToTreeLayerIndex}, " +
+                $"trackingBehaviourIndex={QuickFurySettings.TrackingBehaviourIndex}, " +
+                $"behaviourContainerFilter={QuickFurySettings.BehaviourContainerFilter}, " +
+                $"deduplicateGeneratedClips={QuickFurySettings.DeduplicateGeneratedClips}, " +
                 $"skipTransformAssetScan={QuickFurySettings.SkipTransformAssetScan}, " +
                 $"skipDuplicateRendererAssetScan={QuickFurySettings.SkipDuplicateRendererAssetScan}"
                 + $", retainSaveAssetsBatching={QuickFurySettings.RetainSaveAssetsBatching}"
+                + $", fastSaveAssetDiscovery={QuickFurySettings.FastSaveAssetDiscovery}"
+                + $", fastControllerAssetGraph={QuickFurySettings.FastControllerAssetGraph}"
+                + $", consolidatedAssetContainer={QuickFurySettings.ConsolidatedAssetContainer}"
+                + $", blendshapeBindingCache={QuickFurySettings.BlendshapeBindingCache}"
+                + $", spsCoveredRenderer={QuickFurySettings.SpsCoveredRenderer}"
+                + $", spsMaterialProbeCache={QuickFurySettings.SpsMaterialProbeCache}"
+                + $", controllerParameterIndex={QuickFurySettings.ControllerParameterIndex}"
+                + $", controllerGraphStats={FastControllerAssetGraphPatch.LastStats}"
+                + $", spsProbeStats={SpsCoveredRendererPatch.LastStats}"
+                + $", behaviourFilterStats={BehaviourContainerFilterPatch.LastStats}"
             );
             return builder.ToString();
+        }
+
+        private static string FormatException(Exception exception) {
+            var parts = new List<string>();
+            for (var current = exception; current != null && parts.Count < 6; current = current.InnerException) {
+                parts.Add(current.GetType().Name + ": " + current.Message.Replace('\r', ' ').Replace('\n', ' '));
+            }
+            return string.Join(" -> ", parts);
         }
 
         private static void AppendAggregates(

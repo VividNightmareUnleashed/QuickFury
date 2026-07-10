@@ -13,16 +13,23 @@ namespace QuickFury {
     /// and every move.
     /// </summary>
     internal static class ArmaturePhysboneIndexPatch {
-        [ThreadStatic] private static List<Component> activePhysbones;
+        private sealed class Context {
+            internal readonly Dictionary<int, List<Component>> ByRoot =
+                new Dictionary<int, List<Component>>();
+        }
+
+        [ThreadStatic] private static Context active;
 
         private static Type physboneType;
         private static FieldInfo avatarObjectField;
+        private static FieldInfo hapticAvatarObjectField;
         private static FieldInfo gameObjectField;
         private static FieldInfo ignoreTransformsField;
         private static MethodInfo getRootTransform;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
             var armatureType = VrcfuryCompatibility.FindType("VF.Service.ArmatureLinkService");
+            var hapticType = VrcfuryCompatibility.FindType("VF.Service.BakeHapticSocketsService");
             var vfGameObjectType = VrcfuryCompatibility.FindType("VF.Utils.VFGameObject");
             var physboneUtilsType = VrcfuryCompatibility.FindType("VF.Utils.PhysboneUtils");
             physboneType = VrcfuryCompatibility.FindType(
@@ -31,6 +38,9 @@ namespace QuickFury {
             var physboneBaseType = VrcfuryCompatibility.FindType("VRC.Dynamics.VRCPhysBoneBase");
 
             var apply = armatureType?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .SingleOrDefault(method => method.Name == "Apply" && method.GetParameters().Length == 0);
+            var hapticApply = hapticType?
+                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .SingleOrDefault(method => method.Name == "Apply" && method.GetParameters().Length == 0);
             var remove = physboneUtilsType?
                 .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
@@ -41,6 +51,10 @@ namespace QuickFury {
                 });
 
             avatarObjectField = armatureType?.GetField("avatarObject", BindingFlags.Instance | BindingFlags.NonPublic);
+            hapticAvatarObjectField = hapticType?.GetField(
+                "avatarObject",
+                BindingFlags.Instance | BindingFlags.NonPublic
+            );
             gameObjectField = vfGameObjectType?.GetField("_gameObject", BindingFlags.Instance | BindingFlags.NonPublic);
             ignoreTransformsField = ArmatureReflection.FindFieldInHierarchy(physboneBaseType, "ignoreTransforms");
             getRootTransform = physboneBaseType?.GetMethod(
@@ -51,7 +65,8 @@ namespace QuickFury {
                 null
             );
 
-            if (apply == null || remove == null || physboneType == null || avatarObjectField == null
+            if (apply == null || hapticApply == null || remove == null || physboneType == null
+                              || avatarObjectField == null || hapticAvatarObjectField == null
                               || gameObjectField == null || ignoreTransformsField == null
                               || getRootTransform == null) {
                 Debug.LogWarning("[QuickFury] Armature PhysBone index disabled: target signature mismatch.");
@@ -65,6 +80,11 @@ namespace QuickFury {
                     finalizer: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(End))
                 );
                 harmony.Patch(
+                    hapticApply,
+                    prefix: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(BeginHaptics)),
+                    finalizer: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(End))
+                );
+                harmony.Patch(
                     remove,
                     prefix: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(RemoveFromPhysbones))
                 );
@@ -74,53 +94,73 @@ namespace QuickFury {
         }
 
         private static void Begin(object __instance) {
-            activePhysbones = null;
+            BeginWithField(__instance, avatarObjectField);
+        }
+
+        private static void BeginHaptics(object __instance) {
+            BeginWithField(__instance, hapticAvatarObjectField);
+        }
+
+        private static void BeginWithField(object instance, FieldInfo avatarField) {
+            active = null;
             if (!QuickFurySettings.PhysboneIndex) return;
 
             try {
-                var avatarWrapper = avatarObjectField.GetValue(__instance);
+                var avatarWrapper = avatarField.GetValue(instance);
                 var avatar = ArmatureReflection.GetGameObject(avatarWrapper, gameObjectField);
                 if (avatar == null) return;
-                activePhysbones = avatar.GetComponentsInChildren(physboneType, true)
-                    .OfType<Component>()
-                    .ToList();
+                var context = new Context();
+                foreach (var component in avatar.GetComponentsInChildren(physboneType, true).OfType<Component>()) {
+                    if (component == null) continue;
+                    var root = getRootTransform.Invoke(component, null) as Transform;
+                    if (root == null) continue;
+                    var id = root.GetInstanceID();
+                    if (!context.ByRoot.TryGetValue(id, out var bucket)) {
+                        bucket = new List<Component>();
+                        context.ByRoot.Add(id, bucket);
+                    }
+                    bucket.Add(component);
+                }
+                active = context;
             } catch (Exception e) {
-                activePhysbones = null;
+                active = null;
                 Debug.LogWarning("[QuickFury] PhysBone index fell back to VRCFury: " + e.Message);
             }
         }
 
         private static Exception End(Exception __exception) {
-            activePhysbones = null;
+            active = null;
             return __exception;
         }
 
         private static bool RemoveFromPhysbones(object __0, bool __1) {
-            var physbones = activePhysbones;
-            if (physbones == null || !__1) return true;
+            var context = active;
+            if (context == null || !__1) return true;
 
             var gameObject = ArmatureReflection.GetGameObject(__0, gameObjectField);
             if (gameObject == null) return true;
             var transform = gameObject.transform;
 
-            foreach (var component in physbones) {
-                if (component == null) continue;
-                var root = getRootTransform.Invoke(component, null) as Transform;
-                if (root == null || transform == root || !transform.IsChildOf(root)) continue;
+            // Only PhysBones rooted on an ancestor can contain this object. Walking the
+            // hierarchy replaces a full PhysBone list scan for every wrapper and move.
+            for (var ancestor = transform.parent; ancestor != null; ancestor = ancestor.parent) {
+                if (!context.ByRoot.TryGetValue(ancestor.GetInstanceID(), out var physbones)) continue;
+                foreach (var component in physbones) {
+                    if (component == null) continue;
+                    var ignoreTransforms = ignoreTransformsField.GetValue(component) as IList;
+                    if (ignoreTransforms == null) return true;
 
-                var ignoreTransforms = ignoreTransformsField.GetValue(component) as IList;
-                if (ignoreTransforms == null) return true;
-
-                var alreadyExcluded = false;
-                foreach (var item in ignoreTransforms) {
-                    var ignored = item as Transform;
-                    if (ignored != null && transform.IsChildOf(ignored)) {
-                        alreadyExcluded = true;
-                        break;
+                    var alreadyExcluded = false;
+                    foreach (var item in ignoreTransforms) {
+                        var ignored = item as Transform;
+                        if (ignored != null && transform.IsChildOf(ignored)) {
+                            alreadyExcluded = true;
+                            break;
+                        }
                     }
-                }
 
-                if (!alreadyExcluded) ignoreTransforms.Add(transform);
+                    if (!alreadyExcluded) ignoreTransforms.Add(transform);
+                }
             }
 
             return false;

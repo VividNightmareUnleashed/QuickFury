@@ -35,9 +35,19 @@ namespace QuickFury {
                 ArmaturePhysboneIndexPatch.Install(Harmony, compatibility);
                 ArmatureSkinIndexPatch.Install(Harmony, compatibility);
                 ArmatureDestroyIndexPatch.Install(Harmony, compatibility);
+                ArmatureDebugInfoPatch.Install(Harmony, compatibility);
+                FastArmatureMovePatch.Install(Harmony, compatibility);
                 SaveAssetsDuplicateScanPatch.Install(Harmony, compatibility);
                 SaveAssetsBatchingPatch.Install(Harmony, compatibility);
+                ConsolidatedAssetContainerPatch.Install(Harmony, compatibility);
+                FastControllerAssetGraphPatch.Install(Harmony, compatibility);
+                BlendshapeBindingCachePatch.Install(Harmony, compatibility);
+                SpsCoveredRendererPatch.Install(Harmony, compatibility);
+                SpsMaterialProbeCachePatch.Install(Harmony, compatibility);
+                ControllerParameterIndexPatch.Install(Harmony, compatibility);
                 LayerToTreeLayerIndexPatch.Install(Harmony, compatibility);
+                TrackingBehaviourIndexPatch.Install(Harmony, compatibility);
+                BehaviourContainerFilterPatch.Install(Harmony, compatibility);
             } else {
                 Debug.LogWarning(
                     $"[QuickFury] Profiling is active, but behavior-changing optimizations are disabled for " +

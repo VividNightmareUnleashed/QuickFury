@@ -20,6 +20,15 @@ namespace QuickFury {
             internal Type ComponentType;
             internal MethodInfo GetRootTransform;
             internal readonly List<RootBucket> Roots = new List<RootBucket>();
+            internal readonly Dictionary<int, List<IndexedComponent>> ByComponentRoot =
+                new Dictionary<int, List<IndexedComponent>>();
+            internal bool Indexed;
+        }
+
+        private sealed class IndexedComponent {
+            internal int Order;
+            internal Component Component;
+            internal GameObject UploadRoot;
         }
 
         private sealed class RootBucket {
@@ -171,16 +180,21 @@ namespace QuickFury {
 
             var target = targetObject.transform;
             foreach (var category in context.Categories) {
-                foreach (var bucket in category.Roots) {
-                    BuildBucketIfNeeded(category, bucket);
-                    foreach (var component in bucket.Components) {
-                        // A fresh GetComponentsInChildren call would no longer include destroyed
-                        // components or components that have left this upload root.
-                        if (component == null || !component.transform.IsChildOf(bucket.Root.transform)) continue;
-
-                        var root = InvokeUnwrapped(category.GetRootTransform, component, null) as Transform;
-                        if (root.IsChildOf(target)) Object.DestroyImmediate(component);
+                BuildCategoryIndexIfNeeded(category);
+                var matches = new List<IndexedComponent>();
+                foreach (var child in target.GetComponentsInChildren<Transform>(true)) {
+                    if (category.ByComponentRoot.TryGetValue(child.GetInstanceID(), out var bucket)) {
+                        matches.AddRange(bucket);
                     }
+                }
+                matches.Sort((left, right) => left.Order.CompareTo(right.Order));
+                foreach (var entry in matches) {
+                    var component = entry.Component;
+                    // A fresh GetComponentsInChildren call would no longer include destroyed
+                    // components or components that have left this upload root.
+                    if (component == null || entry.UploadRoot == null
+                                          || !component.transform.IsChildOf(entry.UploadRoot.transform)) continue;
+                    Object.DestroyImmediate(component);
                 }
             }
 
@@ -237,6 +251,31 @@ namespace QuickFury {
                     .Where(component => component != null)
             );
             bucket.Built = true;
+        }
+
+        private static void BuildCategoryIndexIfNeeded(Category category) {
+            if (category.Indexed) return;
+
+            var order = 0;
+            foreach (var uploadBucket in category.Roots) {
+                BuildBucketIfNeeded(category, uploadBucket);
+                foreach (var component in uploadBucket.Components) {
+                    if (component == null) continue;
+                    var root = InvokeUnwrapped(category.GetRootTransform, component, null) as Transform;
+                    if (root == null) continue;
+                    var id = root.GetInstanceID();
+                    if (!category.ByComponentRoot.TryGetValue(id, out var rootBucket)) {
+                        rootBucket = new List<IndexedComponent>();
+                        category.ByComponentRoot.Add(id, rootBucket);
+                    }
+                    rootBucket.Add(new IndexedComponent {
+                        Order = order++,
+                        Component = component,
+                        UploadRoot = uploadBucket.Root
+                    });
+                }
+            }
+            category.Indexed = true;
         }
 
         private static bool SameRoots(IReadOnlyList<GameObject> left, IReadOnlyList<GameObject> right) {
