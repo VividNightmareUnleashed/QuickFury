@@ -7,7 +7,13 @@ $ErrorActionPreference = 'Stop'
 
 $repo = $PSScriptRoot
 $src = Join-Path $repo 'com.quickfury.addon'
-$staging = Join-Path ([System.IO.Path]::GetTempPath()) 'quickfury-unitypackage-staging'
+$tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+$staging = [System.IO.Path]::GetFullPath(
+    (Join-Path $tempRoot 'quickfury-unitypackage-staging')
+)
+if (-not $staging.StartsWith($tempRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Staging path escaped the temporary directory: $staging"
+}
 $pkgRoot = 'Packages/com.quickfury.addon'
 
 $version = (Get-Content (Join-Path $src 'package.json') -Raw | ConvertFrom-Json).version
@@ -45,7 +51,9 @@ function Get-MetaBody([string]$relPath, [bool]$isFolder) {
 
 # Relative paths (forward slashes) of everything in the package. Folders need entries too
 # (except the package root itself, which Unity mounts via package.json and has no meta).
-$folders = @('Editor', 'Editor/Patches')
+$folders = Get-ChildItem $src -Recurse -Directory | ForEach-Object {
+    $_.FullName.Substring($src.Length + 1).Replace('\', '/')
+} | Sort-Object
 $files = Get-ChildItem $src -Recurse -File | Where-Object { $_.Name -notlike '*.meta' } | ForEach-Object {
     $_.FullName.Substring($src.Length + 1).Replace('\', '/')
 }
