@@ -2,7 +2,7 @@
 
 QuickFury is an Editor-only, bolt-on performance layer for an existing VRCFury installation. It profiles VRCFury's bake and can replace a few measured hot paths with indexed implementations. It does not ship, fork, or modify VRCFury.
 
-The current release is a tested prototype for VRCFury 1.1348.0. On the development avatar it reduced a warm VRCFury bake from 98.54 seconds to 23.81 seconds. Read [PERFORMANCE.md](PERFORMANCE.md) for the measurements and validation boundary.
+QuickFury 1.2 is tested against VRCFury 1.1348.0. Its initial rewrite benchmark reduced a warm VRCFury bake from 98.54 seconds to 23.81 seconds. Version 1.2 reached a best clean measurement of 13.996 seconds, 56.2% below a 31.947-second same-session control. Read [PERFORMANCE.md](PERFORMANCE.md) for the measurements and validation boundary.
 
 ## Requirements and compatibility
 
@@ -43,6 +43,15 @@ The optimization toggles are:
 - **Ordered animation path rewrite**: resolves deferred path moves with an ordered prefix index while preserving chronological rewrite semantics.
 - **Skip empty deferred rewrite**: avoids clip traversal when there are no deferred moves.
 - **Retain SaveAssets batching (Unity 2022)**: keeps VRCFury's outer `AssetDatabase.StartAssetEditing` batch active while generated assets are created. VRCFury exits that batch for a Unity 6 workaround; QuickFury restores batching only on Unity 2022.
+- **Skip Armature Link debug components**: avoids creating Editor-only debug records during normal optimized bakes.
+- **Fast Armature Link moves**: applies the large, already-validated Armature Link move set without repeated wrapper bookkeeping.
+- **Fast generated-asset discovery** and **Fast controller asset graph**: replace repeated reflective graph walks with scoped, identity-aware traversal.
+- **Consolidate generated asset files**: stores the generated controller graph in a small fixed set of asset containers instead of repeatedly creating separate files.
+- **Cache blendshape controller bindings**: reuses equivalent blendshape binding discovery within the bake.
+- **Skip covered SPS mesh probes** and **Cache DPS-TPS material probes**: avoid repeated SPS renderer and material inspection.
+- **Controller parameter index**: replaces repeated linear parameter-name searches with a mutation-aware index.
+- **Tracking behaviour index** and **Filter irrelevant behaviour containers**: narrow repeated state-machine behaviour work while preserving generated tracking-driver output.
+- **Deduplicate generated animation clips**: merges only exact, self-originating generated clips before finalization.
 - **Skip inert Transform asset scans** and **Skip duplicate renderer asset scan**: conservative SaveAssets experiments. They reduced scan counts but did not materially improve SaveAssets time on the measured avatar, so they default off.
 
 The measured, parity-checked optimizations default on for a fresh install. Use **Tools > QuickFury > Use recommended settings** to restore that set, or **Disable all optimizations** for an immediate VRCFury control run. Individual toggles remain available for diagnosis and rollback.
@@ -58,5 +67,7 @@ Detailed timings add some overhead, so compare runs with the same profiling sett
 ## Safety and rollback
 
 QuickFury patches Editor methods at assembly load and removes only patches registered under its own Harmony ID before reload. It never changes VRCFury package files. To roll back, disable the toggles, remove the QuickFury package dependency, and let Unity recompile.
+
+**QuickFury is an unofficial third-party addon. It is not supported, endorsed, or maintained by VRCFury, and no guarantee is made that it will work correctly for every avatar, project, or future release. Do not report a problem to VRCFury while QuickFury is installed. Remove QuickFury completely, let Unity recompile, and reproduce the issue with stock VRCFury first. Problems that occur only with QuickFury installed belong in the QuickFury issue tracker. QuickFury is provided without warranty and is used at your own risk.**
 
 Treat any VRCFury upgrade as unsupported until QuickFury is re-profiled and revalidated against that exact release. Unknown versions retain profiling but fail closed for every behavior-changing patch. The package has also been checked structurally, but avatar-specific visual and behavioral smoke tests remain prudent.

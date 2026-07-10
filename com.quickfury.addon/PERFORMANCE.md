@@ -1,6 +1,40 @@
 # Performance investigation
 
-## Result
+## Version 1.2 pass (2026-07-10)
+
+The latest pass reached a best clean full-bake measurement of **13.996 s**, down from a
+**31.947 s** control captured at the start of the same profiling session (**56.2%**) and from
+the earlier 1.1 warm result of **23.810 s** (**41.2%**).
+
+| Phase | Session control | Best clean optimized run |
+| --- | ---: | ---: |
+| Full VRCFury bake | 31.947 s | **13.996 s** |
+| Armature Link | 7.901 s | **1.255 s** |
+| SaveAssets | 7.008 s | **2.284 s** |
+
+This pass adds fast Armature Link moves, controller-graph and generated-asset indexing,
+consolidated asset containers, controller-parameter and behaviour indexes, SPS/blendshape
+caches, and conservative generated-clip deduplication. Detailed profiling was disabled after
+the investigation so normal use does not retain its instrumentation overhead.
+
+Validation performed on the loaded development avatar included:
+
+- all 21 animation-clip replacements matched after same-bake shadow finalization;
+- fast Armature Link output matched bone, bindpose, and hierarchy structure, with only normal
+  per-run floating-point drift;
+- behaviour-container filtering matched after canonicalizing VRCFury's generated tracking
+  driver order;
+- consolidated saving produced exactly two generated files and no unsaved reachable non-scene
+  assets;
+- the controller-parameter and tracking-behaviour indexes preserved their reference results.
+
+Several higher-risk experiments were discarded because they did not help: a direct raw
+tracking scan regressed its phase, post-finalization clip dedup cost more than it saved, and a
+validated fast clip finalizer was performance-neutral. A recurring 3-7 second Toggle action
+outlier was narrowed to one `ActionClipService.LoadStateAdv("On")` call; it remains a source of
+run-to-run variance rather than a retained QuickFury optimization.
+
+## Initial rewrite result
 
 On the development avatar, the complete tested set reduced a warm VRCFury bake from **98.542 s to 23.810 s** (**75.8%**). Armature Link fell from **61.762 s to 6.467 s** (**89.5%**), layer-to-tree conversion fell from **11.844 s to 0.572 s** (**95.2%**), and SaveAssets fell from **14.554 s to 6.365 s** (**56.3%**).
 

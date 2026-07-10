@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.0 — 2026-07-10
+
+Extend the 1.1 rewrite into the remaining measured VRCFury bake hot paths.
+
+- Apply large Armature Link move sets directly and skip optional Editor-only debug records.
+- Replace repeated generated-asset and controller-graph traversal with scoped identity indexes.
+- Consolidate generated controller assets into a fixed pair of files instead of repeatedly
+  creating separate asset files.
+- Index controller parameters and tracking behaviours, and exclude irrelevant behaviour
+  containers from repeated conflict passes.
+- Cache repeated blendshape bindings and SPS renderer/material probes.
+- Deduplicate only exact self-originating generated animation clips before finalization; all 21
+  replacements matched after same-bake shadow finalization.
+- Preserve fail-closed compatibility checks and individual rollback toggles for every new path.
+
+The best clean bake on the measured avatar fell from the earlier 1.1 result of 23.810 seconds
+to 13.996 seconds (41.2% faster). Against the 31.947-second control captured at the start of
+the same profiling session, 1.2 was 56.2% faster. Armature Link fell from 7.901 to 1.255
+seconds, and SaveAssets fell from 7.008 to 2.284 seconds.
+
 ## 1.1.0 — 2026-07-10
 
 Complete rewrite of QuickFury around measured, fail-closed VRCFury optimizations.
