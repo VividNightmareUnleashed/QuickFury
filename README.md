@@ -132,5 +132,10 @@ and [the performance report](com.quickfury.addon/PERFORMANCE.md) for methodology
 
 ## License
 
-MIT — see [LICENSE.md](LICENSE.md). QuickFury is independent of and is not endorsed by VRCFury;
-see the package [NOTICE.md](com.quickfury.addon/NOTICE.md).
+QuickFury may be used, modified, forked, and redistributed for free with attribution, but it
+may not itself be sold or paywalled. It may be bundled within a paid product only with clear,
+visible credit and a link to this repository, and it may not be marketed as a paid
+creator-offered extra or premium addon. Reused code must also clearly credit QuickFury. See
+[LICENSE.md](LICENSE.md) for the complete terms. QuickFury is independent of and is not
+endorsed by VRCFury; see the package
+[NOTICE.md](com.quickfury.addon/NOTICE.md).

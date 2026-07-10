@@ -4,7 +4,7 @@
   "version": "1.2.0",
   "unity": "2022.3",
   "description": "Profiling-first, bolt-on performance layer for VRCFury avatar bakes.",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE.md",
   "author": {
     "name": "Vivid Nightmare"
   },

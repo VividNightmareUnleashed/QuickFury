@@ -1,21 +1,31 @@
-MIT License
+# QuickFury License
 
-Copyright (c) 2026 Vivid Nightmare
+Copyright (c) 2026 Vivid Nightmare. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Permission is granted to download, use, copy, modify, fork, and redistribute QuickFury, subject
+to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. QuickFury may not itself be sold, resold, rented, sublicensed for a fee, paywalled, or used
+   to monetize access.
+2. Redistributed copies and forks must retain this license and the original copyright notice,
+   clearly credit QuickFury, and link to the official QuickFury repository.
+3. Modified copies and forks must clearly state that they have been modified and must not imply
+   endorsement by or official support from QuickFury, VRCFury, or their authors.
+4. Reuse of QuickFury source code in another project must clearly credit QuickFury and link to
+   the official QuickFury repository.
+5. QuickFury may be bundled within a paid product only when the product gives QuickFury clear,
+   visible credit, links to the official QuickFury repository, and includes this license. It may
+   not be advertised, priced, paywalled, or marketed as a creator-offered extra, premium addon,
+   paid upgrade, or other benefit that the customer must pay to receive. No part of the product
+   price may be represented as payment for QuickFury.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+These restrictions apply to QuickFury itself, not to avatars or other content processed using
+QuickFury.
+
+All rights not expressly granted by this license are reserved by the copyright holder.
+
+QUICKFURY IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR
+IN CONNECTION WITH QUICKFURY OR THE USE OR OTHER DEALINGS IN QUICKFURY.
