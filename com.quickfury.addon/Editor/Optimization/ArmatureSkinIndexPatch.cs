@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 using HarmonyLib;
 using UnityEngine;
 
@@ -23,7 +22,6 @@ namespace QuickFury {
         private sealed class Context {
             internal GameObject Avatar;
             internal readonly List<Rewrite> Rewrites = new List<Rewrite>();
-            internal bool Flushed;
         }
 
         [ThreadStatic] private static Context active;
@@ -114,7 +112,7 @@ namespace QuickFury {
 
         private static bool RecordRewrite(object __0, object __1) {
             var context = active;
-            if (context == null || context.Flushed) return true;
+            if (context == null) return true;
 
             var from = ArmatureReflection.GetGameObject(__0, gameObjectField)?.transform;
             var to = ArmatureReflection.GetGameObject(__1, gameObjectField)?.transform;
@@ -132,8 +130,8 @@ namespace QuickFury {
 
         private static void Flush() {
             var context = active;
-            if (context == null || context.Flushed) return;
-            context.Flushed = true;
+            active = null;
+            if (context == null) return;
 
             if (context.Avatar == null || context.Rewrites.Count == 0) return;
 
@@ -167,7 +165,7 @@ namespace QuickFury {
                 if (!slotsByBone.TryGetValue(rewrite.From, out var slots) || slots.Count == 0) continue;
 
                 if (!changed) {
-                    mesh = InvokeUnwrapped(getMutableMesh, null, new object[] {
+                    mesh = VrcfuryCompatibility.InvokeUnwrapped(getMutableMesh, null, new object[] {
                         skin,
                         "Needed to change bone bind-poses for Armature Link to re-use bones on base armature"
                     }) as Mesh;
@@ -201,16 +199,7 @@ namespace QuickFury {
             }
 
             skin.bones = bones;
-            InvokeUnwrapped(dirty, null, new object[] { skin });
-        }
-
-        private static object InvokeUnwrapped(MethodInfo method, object instance, object[] args) {
-            try {
-                return method.Invoke(instance, args);
-            } catch (TargetInvocationException e) when (e.InnerException != null) {
-                ExceptionDispatchInfo.Capture(e.InnerException).Throw();
-                throw;
-            }
+            VrcfuryCompatibility.InvokeUnwrapped(dirty, null, new object[] { skin });
         }
     }
 }

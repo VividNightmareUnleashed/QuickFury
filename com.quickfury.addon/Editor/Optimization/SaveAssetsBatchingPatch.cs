@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -16,14 +15,14 @@ namespace QuickFury {
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
             var saveAssetsType = compatibility.AvatarEditorAssembly.GetType("VF.Service.SaveAssetsService", false);
-            var run = FindUniqueMethod(
+            var run = VrcfuryCompatibility.FindUniqueMethod(
                 saveAssetsType,
                 "Run",
                 method => method.ReturnType == typeof(void) && method.GetParameters().Length == 0
             );
 
             var assetDatabaseType = VrcfuryCompatibility.FindType("VF.Utils.VRCFuryAssetDatabase");
-            var withoutAssetEditing = FindUniqueMethod(
+            var withoutAssetEditing = VrcfuryCompatibility.FindUniqueMethod(
                 assetDatabaseType,
                 "WithoutAssetEditing",
                 method => {
@@ -79,17 +78,6 @@ namespace QuickFury {
 
         private static bool IsUnity2022() {
             return Application.unityVersion.StartsWith("2022.", StringComparison.Ordinal);
-        }
-
-        private static MethodInfo FindUniqueMethod(Type type, string name, Func<MethodInfo, bool> predicate) {
-            if (type == null) return null;
-            return type
-                .GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic |
-                            BindingFlags.DeclaredOnly)
-                .Where(method => method.Name == name)
-                .Where(method => !method.ContainsGenericParameters)
-                .Where(predicate)
-                .SingleOrDefault();
         }
     }
 }

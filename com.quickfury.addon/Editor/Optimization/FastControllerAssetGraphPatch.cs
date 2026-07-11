@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 using HarmonyLib;
@@ -32,6 +31,8 @@ namespace QuickFury {
         private static PropertyInfo curveIsFloat;
         private static PropertyInfo curveFloatCurve;
         private static PropertyInfo curveObjectCurve;
+        private static Type clipSettingsType;
+        private static PropertyInfo[] clipSettingsProperties;
         [ThreadStatic] private static HashSet<Object> savedOrScheduled;
         [ThreadStatic] private static long lastStatsTicks;
         internal static string LastStats { get; private set; } = "none";
@@ -259,7 +260,7 @@ namespace QuickFury {
                     clipCount++;
                     if (reuseOriginalClips) {
                         timed = Stopwatch.GetTimestamp();
-                        var original = InvokeUnwrapped(
+                        var original = VrcfuryCompatibility.InvokeUnwrapped(
                             getUseOriginalClip,
                             null,
                             new object[] { clip }
@@ -284,7 +285,7 @@ namespace QuickFury {
                         }
                     }
                     timed = Stopwatch.GetTimestamp();
-                    InvokeUnwrapped(finalizeClip, null, new object[] { clip, true });
+                    VrcfuryCompatibility.InvokeUnwrapped(finalizeClip, null, new object[] { clip, true });
                     finalizeClipTicks += Stopwatch.GetTimestamp() - timed;
                 }
                 known?.Add(current);
@@ -335,7 +336,7 @@ namespace QuickFury {
                 // that at least one behaviour can reach a replaced clip.
                 if (nativeDependencies.Any(clipReplacements.ContainsKey)) {
                     foreach (var behaviour in output.OfType<StateMachineBehaviour>()) {
-                        InvokeUnwrapped(
+                        VrcfuryCompatibility.InvokeUnwrapped(
                             rewriteInternals,
                             null,
                             new object[] { behaviour, clipReplacements }
@@ -373,7 +374,7 @@ namespace QuickFury {
         }
 
         private static string GetGeneratedClipContentKey(AnimationClip clip) {
-            var ext = InvokeUnwrapped(getClipExt, null, new object[] { clip });
+            var ext = VrcfuryCompatibility.InvokeUnwrapped(getClipExt, null, new object[] { clip });
             if (ext == null) return null;
 
             // Modified copies of user clips need their original Euler rotation-order
@@ -391,10 +392,7 @@ namespace QuickFury {
             AppendBounds(builder, clip.localBounds);
 
             var settings = AnimationUtility.GetAnimationClipSettings(clip);
-            foreach (var property in settings.GetType()
-                         .GetProperties(BindingFlags.Instance | BindingFlags.Public)
-                         .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
-                         .OrderBy(property => property.Name, StringComparer.Ordinal)) {
+            foreach (var property in GetClipSettingsProperties(settings.GetType())) {
                 builder.Append("setting|").Append(property.Name).Append('|')
                     .Append(Value(property.GetValue(settings, null))).AppendLine();
             }
@@ -462,6 +460,18 @@ namespace QuickFury {
             }
         }
 
+        private static PropertyInfo[] GetClipSettingsProperties(Type type) {
+            if (type == clipSettingsType) return clipSettingsProperties;
+
+            clipSettingsProperties = type
+                .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
+                .OrderBy(property => property.Name, StringComparer.Ordinal)
+                .ToArray();
+            clipSettingsType = type;
+            return clipSettingsProperties;
+        }
+
         private static string Float(float value) {
             return value.ToString("R", CultureInfo.InvariantCulture);
         }
@@ -504,34 +514,48 @@ namespace QuickFury {
         ) {
             switch (current) {
                 case AnimatorController controller:
-                    foreach (var layer in controller.layers.Reverse()) {
+                    var layers = controller.layers;
+                    for (var i = layers.Length - 1; i >= 0; i--) {
+                        var layer = layers[i];
                         stack.Push(layer.avatarMask);
                         stack.Push(layer.stateMachine);
                     }
                     break;
 
                 case AnimatorStateMachine stateMachine:
-                    foreach (var behaviour in stateMachine.behaviours.Reverse()) stack.Push(behaviour);
-                    foreach (var transition in stateMachine.entryTransitions.Reverse()) stack.Push(transition);
-                    foreach (var transition in stateMachine.anyStateTransitions.Reverse()) stack.Push(transition);
-                    foreach (var child in stateMachine.stateMachines.Reverse()) {
-                        foreach (var transition in stateMachine.GetStateMachineTransitions(child.stateMachine).Reverse()) {
-                            stack.Push(transition);
+                    var behaviours = stateMachine.behaviours;
+                    for (var i = behaviours.Length - 1; i >= 0; i--) stack.Push(behaviours[i]);
+                    var entryTransitions = stateMachine.entryTransitions;
+                    for (var i = entryTransitions.Length - 1; i >= 0; i--) stack.Push(entryTransitions[i]);
+                    var anyStateTransitions = stateMachine.anyStateTransitions;
+                    for (var i = anyStateTransitions.Length - 1; i >= 0; i--) {
+                        stack.Push(anyStateTransitions[i]);
+                    }
+                    var childStateMachines = stateMachine.stateMachines;
+                    for (var i = childStateMachines.Length - 1; i >= 0; i--) {
+                        var child = childStateMachines[i];
+                        var transitions = stateMachine.GetStateMachineTransitions(child.stateMachine);
+                        for (var transitionIndex = transitions.Length - 1; transitionIndex >= 0; transitionIndex--) {
+                            stack.Push(transitions[transitionIndex]);
                         }
                         stack.Push(child.stateMachine);
                     }
-                    foreach (var child in stateMachine.states.Reverse()) stack.Push(child.state);
+                    var childStates = stateMachine.states;
+                    for (var i = childStates.Length - 1; i >= 0; i--) stack.Push(childStates[i].state);
                     stack.Push(stateMachine.defaultState);
                     break;
 
                 case AnimatorState state:
-                    foreach (var behaviour in state.behaviours.Reverse()) stack.Push(behaviour);
-                    foreach (var transition in state.transitions.Reverse()) stack.Push(transition);
+                    var stateBehaviours = state.behaviours;
+                    for (var i = stateBehaviours.Length - 1; i >= 0; i--) stack.Push(stateBehaviours[i]);
+                    var stateTransitions = state.transitions;
+                    for (var i = stateTransitions.Length - 1; i >= 0; i--) stack.Push(stateTransitions[i]);
                     stack.Push(state.motion);
                     break;
 
                 case BlendTree tree:
-                    foreach (var child in tree.children.Reverse()) stack.Push(child.motion);
+                    var children = tree.children;
+                    for (var i = children.Length - 1; i >= 0; i--) stack.Push(children[i].motion);
                     break;
 
                 case AnimatorTransitionBase transition:
@@ -646,16 +670,7 @@ namespace QuickFury {
         }
 
         private static bool DidCreate(Object obj) {
-            return (bool)InvokeUnwrapped(didCreate, null, new object[] { obj });
-        }
-
-        private static object InvokeUnwrapped(MethodInfo method, object instance, object[] args) {
-            try {
-                return method.Invoke(instance, args);
-            } catch (TargetInvocationException e) when (e.InnerException != null) {
-                ExceptionDispatchInfo.Capture(e.InnerException).Throw();
-                throw;
-            }
+            return (bool)VrcfuryCompatibility.InvokeUnwrapped(didCreate, null, new object[] { obj });
         }
     }
 }

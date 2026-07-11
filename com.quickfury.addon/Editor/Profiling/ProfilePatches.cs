@@ -28,6 +28,7 @@ namespace QuickFury {
 
         [ThreadStatic] private static Stack<Frame> actionFrames;
         [ThreadStatic] private static Stack<Frame> methodFrames;
+        [ThreadStatic] private static bool detailed;
 
         private static VrcfuryCompatibility compatibility;
         private static bool active;
@@ -103,7 +104,8 @@ namespace QuickFury {
             Actions.Clear();
             Methods.Clear();
             actionFrames = new Stack<Frame>();
-            methodFrames = new Stack<Frame>();
+            detailed = QuickFurySettings.DetailedProfiling;
+            methodFrames = detailed ? new Stack<Frame>() : null;
             runStarted = Stopwatch.GetTimestamp();
             active = true;
         }
@@ -143,7 +145,7 @@ namespace QuickFury {
         }
 
         private static void MethodPrefix(MethodBase __originalMethod) {
-            if (!active || !QuickFurySettings.DetailedProfiling) return;
+            if (!active || !detailed) return;
 
             var key = __originalMethod.DeclaringType?.Name + "." + __originalMethod.Name;
             if (actionFrames != null && actionFrames.Count > 0) {
@@ -156,7 +158,7 @@ namespace QuickFury {
         }
 
         private static Exception MethodFinalizer(MethodBase __originalMethod, Exception __exception) {
-            if (!active || !QuickFurySettings.DetailedProfiling || methodFrames == null || methodFrames.Count == 0) {
+            if (!active || !detailed || methodFrames == null || methodFrames.Count == 0) {
                 return __exception;
             }
 
@@ -202,7 +204,7 @@ namespace QuickFury {
             builder.AppendLine("Top actions (exact call duration):");
             AppendAggregates(builder, Actions, 40);
 
-            if (QuickFurySettings.DetailedProfiling) {
+            if (detailed) {
                 builder.AppendLine("Detailed internals (inclusive / self / calls / max):");
                 AppendAggregates(builder, Methods, 80);
             }

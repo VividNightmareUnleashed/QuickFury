@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 using HarmonyLib;
 using UnityEditor;
 using UnityEngine;
@@ -150,7 +149,7 @@ namespace QuickFury {
                     context.Avatar.transform
                 );
 
-                InvokeUnwrapped(removeFromPhysbones, null, new object[] { __0, true });
+                VrcfuryCompatibility.InvokeUnwrapped(removeFromPhysbones, null, new object[] { __0, true });
                 deferred.Add((oldPath, newPath));
                 return false;
             } catch (Exception e) {
@@ -178,15 +177,6 @@ namespace QuickFury {
                 }
             }
             transform.name = name;
-        }
-
-        private static object InvokeUnwrapped(MethodInfo method, object instance, object[] args) {
-            try {
-                return method.Invoke(instance, args);
-            } catch (TargetInvocationException e) when (e.InnerException != null) {
-                ExceptionDispatchInfo.Capture(e.InnerException).Throw();
-                throw;
-            }
         }
     }
 }

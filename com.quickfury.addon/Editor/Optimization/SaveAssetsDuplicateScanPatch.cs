@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 using HarmonyLib;
 using UnityEditor;
 using UnityEditor.Animations;
@@ -38,14 +37,14 @@ namespace QuickFury {
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
             var saveAssetsType = compatibility.AvatarEditorAssembly.GetType("VF.Service.SaveAssetsService", false);
-            var run = FindUniqueMethod(
+            var run = VrcfuryCompatibility.FindUniqueMethod(
                 saveAssetsType,
                 "Run",
                 method => method.ReturnType == typeof(void) && method.GetParameters().Length == 0
             );
 
             var sessionType = VrcfuryCompatibility.FindType("VF.Utils.SaveAssetsSession");
-            var saveComponent = FindUniqueMethod(
+            var saveComponent = VrcfuryCompatibility.FindUniqueMethod(
                 sessionType,
                 "SaveUnsavedComponentAssets",
                 method => {
@@ -56,7 +55,7 @@ namespace QuickFury {
                            && parameters[1].ParameterType == typeof(string);
                 }
             );
-            saveAssetAndChildren = FindUniqueMethod(
+            saveAssetAndChildren = VrcfuryCompatibility.FindUniqueMethod(
                 sessionType,
                 "SaveAssetAndChildren",
                 method => {
@@ -198,7 +197,7 @@ namespace QuickFury {
                 if (asset == null || !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(asset))) continue;
 
                 var filename = GetFilename(asset);
-                InvokeUnwrapped(
+                VrcfuryCompatibility.InvokeUnwrapped(
                     saveAssetAndChildren,
                     saveSession,
                     new object[] { asset, filename, tmpDir, true }
@@ -220,7 +219,7 @@ namespace QuickFury {
                          .Where(asset => asset != null && DidCreate(asset))
                          .Distinct()) {
                 if (!string.IsNullOrEmpty(AssetDatabase.GetAssetPath(asset))) continue;
-                InvokeUnwrapped(
+                VrcfuryCompatibility.InvokeUnwrapped(
                     saveAssetAndChildren,
                     saveSession,
                     new object[] {
@@ -255,27 +254,7 @@ namespace QuickFury {
         }
 
         private static bool DidCreate(Object asset) {
-            return (bool)InvokeUnwrapped(didCreate, null, new object[] { asset });
-        }
-
-        private static object InvokeUnwrapped(MethodInfo method, object instance, object[] args) {
-            try {
-                return method.Invoke(instance, args);
-            } catch (TargetInvocationException e) when (e.InnerException != null) {
-                ExceptionDispatchInfo.Capture(e.InnerException).Throw();
-                throw;
-            }
-        }
-
-        private static MethodInfo FindUniqueMethod(Type type, string name, Func<MethodInfo, bool> predicate) {
-            if (type == null) return null;
-            return type
-                .GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic |
-                            BindingFlags.DeclaredOnly)
-                .Where(method => method.Name == name)
-                .Where(method => !method.ContainsGenericParameters)
-                .Where(predicate)
-                .SingleOrDefault();
+            return (bool)VrcfuryCompatibility.InvokeUnwrapped(didCreate, null, new object[] { asset });
         }
     }
 }

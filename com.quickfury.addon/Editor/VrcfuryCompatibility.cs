@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using UnityEditor.PackageManager;
 
 namespace QuickFury {
@@ -12,14 +13,11 @@ namespace QuickFury {
         internal string PackageVersion { get; private set; }
         internal Guid ModuleVersionId { get; private set; }
 
-        internal Type BuilderType { get; private set; }
         internal MethodInfo RunMain { get; private set; }
-        internal Type ActionType { get; private set; }
         internal MethodInfo ActionCall { get; private set; }
         internal MethodInfo ActionGetName { get; private set; }
         internal MethodInfo ActionGetService { get; private set; }
 
-        internal Type ObjectMoveServiceType { get; private set; }
         internal MethodInfo ApplyDeferred { get; private set; }
         internal MethodInfo ApplyDeferredPathLambda { get; private set; }
         internal FieldInfo DeferredMoves { get; private set; }
@@ -45,42 +43,42 @@ namespace QuickFury {
                 output.PackageVersion = PackageInfo.FindForAssembly(output.AvatarEditorAssembly)?.version ?? "unknown";
                 output.ModuleVersionId = output.AvatarEditorAssembly.ManifestModule.ModuleVersionId;
 
-                output.BuilderType = output.AvatarEditorAssembly.GetType("VF.Builder.VRCFuryBuilder", false);
+                var builderType = output.AvatarEditorAssembly.GetType("VF.Builder.VRCFuryBuilder", false);
                 output.RunMain = FindUniqueMethod(
-                    output.BuilderType,
+                    builderType,
                     "RunMain",
                     BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
                     method => method.ReturnType == typeof(void) && method.GetParameters().Length == 1
                 );
 
-                output.ActionType = output.AvatarEditorAssembly.GetType("VF.Feature.Base.FeatureBuilderAction", false);
+                var actionType = output.AvatarEditorAssembly.GetType("VF.Feature.Base.FeatureBuilderAction", false);
                 output.ActionCall = FindUniqueMethod(
-                    output.ActionType,
+                    actionType,
                     "Call",
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                     method => method.ReturnType == typeof(void) && method.GetParameters().Length == 0
                 );
                 output.ActionGetName = FindUniqueMethod(
-                    output.ActionType,
+                    actionType,
                     "GetName",
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                     method => method.ReturnType == typeof(string) && method.GetParameters().Length == 0
                 );
                 output.ActionGetService = FindUniqueMethod(
-                    output.ActionType,
+                    actionType,
                     "GetService",
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                     method => method.ReturnType == typeof(object) && method.GetParameters().Length == 0
                 );
 
-                output.ObjectMoveServiceType = output.AvatarEditorAssembly.GetType("VF.Service.ObjectMoveService", false);
+                var objectMoveServiceType = output.AvatarEditorAssembly.GetType("VF.Service.ObjectMoveService", false);
                 output.ApplyDeferred = FindUniqueMethod(
-                    output.ObjectMoveServiceType,
+                    objectMoveServiceType,
                     "ApplyDeferred",
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                     method => method.ReturnType == typeof(void) && method.GetParameters().Length == 0
                 );
-                output.ApplyDeferredPathLambda = output.ObjectMoveServiceType?
+                output.ApplyDeferredPathLambda = objectMoveServiceType?
                     .GetMethods(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
                     .Where(method => method.Name.Contains("ApplyDeferred"))
                     .Where(method => method.ReturnType == typeof(string))
@@ -89,7 +87,7 @@ namespace QuickFury {
                         return parameters.Length == 1 && parameters[0].ParameterType == typeof(string);
                     })
                     .SingleOrDefault();
-                output.DeferredMoves = output.ObjectMoveServiceType?
+                output.DeferredMoves = objectMoveServiceType?
                     .GetField("deferred", BindingFlags.Instance | BindingFlags.NonPublic);
 
                 if (output.RunMain == null || output.ActionCall == null
@@ -123,6 +121,29 @@ namespace QuickFury {
                 .Where(method => !method.ContainsGenericParameters)
                 .Where(method => !method.IsAbstract)
                 .Where(method => method.GetMethodBody() != null);
+        }
+
+        internal static MethodInfo FindUniqueMethod(
+            Type type,
+            string name,
+            Func<MethodInfo, bool> predicate
+        ) {
+            return FindUniqueMethod(
+                type,
+                name,
+                BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public |
+                BindingFlags.NonPublic | BindingFlags.DeclaredOnly,
+                method => !method.ContainsGenericParameters && predicate(method)
+            );
+        }
+
+        internal static object InvokeUnwrapped(MethodInfo method, object instance, object[] args) {
+            try {
+                return method.Invoke(instance, args);
+            } catch (TargetInvocationException e) when (e.InnerException != null) {
+                ExceptionDispatchInfo.Capture(e.InnerException).Throw();
+                throw;
+            }
         }
 
         private static MethodInfo FindUniqueMethod(

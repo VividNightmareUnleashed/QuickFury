@@ -15,7 +15,7 @@ namespace QuickFury {
     /// (owner, controller) pair for the duration of Apply.
     /// </summary>
     internal static class BlendshapeBindingCachePatch {
-        private sealed class CacheKey : IEquatable<CacheKey> {
+        private readonly struct CacheKey : IEquatable<CacheKey> {
             internal readonly object Owner;
             internal readonly object Controller;
 
@@ -25,13 +25,12 @@ namespace QuickFury {
             }
 
             public bool Equals(CacheKey other) {
-                return other != null
-                       && ReferenceEquals(Owner, other.Owner)
+                return ReferenceEquals(Owner, other.Owner)
                        && ReferenceEquals(Controller, other.Controller);
             }
 
             public override bool Equals(object obj) {
-                return Equals(obj as CacheKey);
+                return obj is CacheKey other && Equals(other);
             }
 
             public override int GetHashCode() {
@@ -95,7 +94,7 @@ namespace QuickFury {
             object obj,
             object controller,
             ref ICollection<(EditorCurveBinding, AnimationCurve)> __result,
-            out CacheKey __state
+            out CacheKey? __state
         ) {
             __state = null;
             var context = active;
@@ -112,12 +111,12 @@ namespace QuickFury {
         }
 
         private static void Store(
-            CacheKey __state,
+            CacheKey? __state,
             ICollection<(EditorCurveBinding, AnimationCurve)> __result
         ) {
-            if (__state == null || __result == null) return;
+            if (!__state.HasValue || __result == null) return;
             var context = active;
-            if (context != null) context.Results[__state] = __result;
+            if (context != null) context.Results[__state.Value] = __result;
         }
     }
 }

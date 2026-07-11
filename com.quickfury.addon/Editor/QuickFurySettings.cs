@@ -27,6 +27,74 @@ namespace QuickFury {
         internal const string DeduplicateGeneratedClipsKey = "com.quickfury.deduplicateGeneratedClips";
         internal const string DetailedProfilingKey = "com.quickfury.detailedProfiling";
 
+        private const string OptimizationsMenu = "Tools/QuickFury/Optimizations/";
+        private const string ProfilingMenu = "Tools/QuickFury/Profiling/";
+        private const string ConstraintIndexMenu = OptimizationsMenu + "Armature constraint index";
+        private const string PhysboneIndexMenu = OptimizationsMenu + "Armature PhysBone index";
+        private const string SkinIndexMenu = OptimizationsMenu + "Armature skin index";
+        private const string DestroyIndexMenu = OptimizationsMenu + "Armature destroy index";
+        private const string SkipArmatureDebugInfoMenu =
+            OptimizationsMenu + "Skip Armature Link debug components";
+        private const string FastArmatureMoveMenu = OptimizationsMenu + "Fast Armature Link moves";
+        private const string SkipTransformAssetScanMenu =
+            OptimizationsMenu + "Skip inert Transform asset scans";
+        private const string SkipDuplicateRendererAssetScanMenu =
+            OptimizationsMenu + "Skip duplicate renderer asset scan";
+        private const string RetainSaveAssetsBatchingMenu =
+            OptimizationsMenu + "Retain SaveAssets batching (Unity 2022)";
+        private const string FastSaveAssetDiscoveryMenu =
+            OptimizationsMenu + "Fast generated-asset discovery";
+        private const string FastControllerAssetGraphMenu =
+            OptimizationsMenu + "Fast controller asset graph";
+        private const string ConsolidatedAssetContainerMenu =
+            OptimizationsMenu + "Consolidate generated asset files";
+        private const string BlendshapeBindingCacheMenu =
+            OptimizationsMenu + "Cache blendshape controller bindings";
+        private const string SpsCoveredRendererMenu =
+            OptimizationsMenu + "Skip covered SPS mesh probes";
+        private const string SpsMaterialProbeCacheMenu =
+            OptimizationsMenu + "Cache DPS-TPS material probes";
+        private const string ControllerParameterIndexMenu =
+            OptimizationsMenu + "Controller parameter index";
+        private const string LayerToTreeLayerIndexMenu =
+            OptimizationsMenu + "Layer-to-tree layer index";
+        private const string TrackingBehaviourIndexMenu =
+            OptimizationsMenu + "Tracking behaviour index";
+        private const string BehaviourContainerFilterMenu =
+            OptimizationsMenu + "Filter irrelevant behaviour containers";
+        private const string DeduplicateGeneratedClipsMenu =
+            OptimizationsMenu + "Deduplicate generated animation clips";
+        private const string OrderedPathsMenu =
+            OptimizationsMenu + "Ordered animation path rewrite";
+        private const string EmptyDeferredRewriteMenu =
+            OptimizationsMenu + "Skip empty deferred rewrite";
+        private const string DetailedProfilingMenu = ProfilingMenu + "Detailed internal timings";
+
+        private static readonly (string Key, bool Recommended)[] OptimizationDefaults = {
+            (OptimizeOrderedPathsKey, true),
+            (SkipEmptyDeferredRewriteKey, true),
+            (ConstraintIndexKey, true),
+            (PhysboneIndexKey, true),
+            (SkinIndexKey, true),
+            (DestroyIndexKey, true),
+            (SkipArmatureDebugInfoKey, true),
+            (FastArmatureMoveKey, true),
+            (LayerToTreeLayerIndexKey, true),
+            (TrackingBehaviourIndexKey, true),
+            (BehaviourContainerFilterKey, true),
+            (DeduplicateGeneratedClipsKey, true),
+            (SkipTransformAssetScanKey, false),
+            (SkipDuplicateRendererAssetScanKey, false),
+            (RetainSaveAssetsBatchingKey, true),
+            (FastSaveAssetDiscoveryKey, true),
+            (FastControllerAssetGraphKey, true),
+            (ConsolidatedAssetContainerKey, true),
+            (BlendshapeBindingCacheKey, true),
+            (SpsCoveredRendererKey, true),
+            (SpsMaterialProbeCacheKey, true),
+            (ControllerParameterIndexKey, true)
+        };
+
         internal static bool OptimizeOrderedPaths => EditorPrefs.GetBool(OptimizeOrderedPathsKey, true);
         internal static bool SkipEmptyDeferredRewrite => EditorPrefs.GetBool(SkipEmptyDeferredRewriteKey, true);
         internal static bool ConstraintIndex => EditorPrefs.GetBool(ConstraintIndexKey, true);
@@ -54,361 +122,212 @@ namespace QuickFury {
 
         [MenuItem("Tools/QuickFury/Use recommended settings", false, 1)]
         private static void UseRecommendedSettings() {
-            EditorPrefs.SetBool(OptimizeOrderedPathsKey, true);
-            EditorPrefs.SetBool(SkipEmptyDeferredRewriteKey, true);
-            EditorPrefs.SetBool(ConstraintIndexKey, true);
-            EditorPrefs.SetBool(PhysboneIndexKey, true);
-            EditorPrefs.SetBool(SkinIndexKey, true);
-            EditorPrefs.SetBool(DestroyIndexKey, true);
-            EditorPrefs.SetBool(SkipArmatureDebugInfoKey, true);
-            EditorPrefs.SetBool(FastArmatureMoveKey, true);
-            EditorPrefs.SetBool(LayerToTreeLayerIndexKey, true);
-            EditorPrefs.SetBool(TrackingBehaviourIndexKey, true);
-            EditorPrefs.SetBool(BehaviourContainerFilterKey, true);
-            EditorPrefs.SetBool(DeduplicateGeneratedClipsKey, true);
-            EditorPrefs.SetBool(SkipTransformAssetScanKey, false);
-            EditorPrefs.SetBool(SkipDuplicateRendererAssetScanKey, false);
-            EditorPrefs.SetBool(RetainSaveAssetsBatchingKey, true);
-            EditorPrefs.SetBool(FastSaveAssetDiscoveryKey, true);
-            EditorPrefs.SetBool(FastControllerAssetGraphKey, true);
-            EditorPrefs.SetBool(ConsolidatedAssetContainerKey, true);
-            EditorPrefs.SetBool(BlendshapeBindingCacheKey, true);
-            EditorPrefs.SetBool(SpsCoveredRendererKey, true);
-            EditorPrefs.SetBool(SpsMaterialProbeCacheKey, true);
-            EditorPrefs.SetBool(ControllerParameterIndexKey, true);
+            foreach (var (key, recommended) in OptimizationDefaults) {
+                EditorPrefs.SetBool(key, recommended);
+            }
         }
 
         [MenuItem("Tools/QuickFury/Disable all optimizations", false, 2)]
         private static void DisableAllOptimizations() {
-            EditorPrefs.SetBool(OptimizeOrderedPathsKey, false);
-            EditorPrefs.SetBool(SkipEmptyDeferredRewriteKey, false);
-            EditorPrefs.SetBool(ConstraintIndexKey, false);
-            EditorPrefs.SetBool(PhysboneIndexKey, false);
-            EditorPrefs.SetBool(SkinIndexKey, false);
-            EditorPrefs.SetBool(DestroyIndexKey, false);
-            EditorPrefs.SetBool(SkipArmatureDebugInfoKey, false);
-            EditorPrefs.SetBool(FastArmatureMoveKey, false);
-            EditorPrefs.SetBool(LayerToTreeLayerIndexKey, false);
-            EditorPrefs.SetBool(TrackingBehaviourIndexKey, false);
-            EditorPrefs.SetBool(BehaviourContainerFilterKey, false);
-            EditorPrefs.SetBool(DeduplicateGeneratedClipsKey, false);
-            EditorPrefs.SetBool(SkipTransformAssetScanKey, false);
-            EditorPrefs.SetBool(SkipDuplicateRendererAssetScanKey, false);
-            EditorPrefs.SetBool(RetainSaveAssetsBatchingKey, false);
-            EditorPrefs.SetBool(FastSaveAssetDiscoveryKey, false);
-            EditorPrefs.SetBool(FastControllerAssetGraphKey, false);
-            EditorPrefs.SetBool(ConsolidatedAssetContainerKey, false);
-            EditorPrefs.SetBool(BlendshapeBindingCacheKey, false);
-            EditorPrefs.SetBool(SpsCoveredRendererKey, false);
-            EditorPrefs.SetBool(SpsMaterialProbeCacheKey, false);
-            EditorPrefs.SetBool(ControllerParameterIndexKey, false);
+            foreach (var (key, _) in OptimizationDefaults) {
+                EditorPrefs.SetBool(key, false);
+            }
         }
 
-        [MenuItem("Tools/QuickFury/Optimizations/Armature constraint index")]
-        private static void ToggleConstraintIndex() {
-            EditorPrefs.SetBool(ConstraintIndexKey, !ConstraintIndex);
-        }
+        [MenuItem(ConstraintIndexMenu)]
+        private static void ToggleConstraintIndex() => Toggle(ConstraintIndexKey, ConstraintIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Armature constraint index", true)]
-        private static bool ValidateConstraintIndex() {
-            Menu.SetChecked("Tools/QuickFury/Optimizations/Armature constraint index", ConstraintIndex);
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(ConstraintIndexMenu, true)]
+        private static bool ValidateConstraintIndex() => ValidateOptimization(ConstraintIndexMenu, ConstraintIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Armature PhysBone index")]
-        private static void TogglePhysboneIndex() {
-            EditorPrefs.SetBool(PhysboneIndexKey, !PhysboneIndex);
-        }
+        [MenuItem(PhysboneIndexMenu)]
+        private static void TogglePhysboneIndex() => Toggle(PhysboneIndexKey, PhysboneIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Armature PhysBone index", true)]
-        private static bool ValidatePhysboneIndex() {
-            Menu.SetChecked("Tools/QuickFury/Optimizations/Armature PhysBone index", PhysboneIndex);
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(PhysboneIndexMenu, true)]
+        private static bool ValidatePhysboneIndex() => ValidateOptimization(PhysboneIndexMenu, PhysboneIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Armature skin index")]
-        private static void ToggleSkinIndex() {
-            EditorPrefs.SetBool(SkinIndexKey, !SkinIndex);
-        }
+        [MenuItem(SkinIndexMenu)]
+        private static void ToggleSkinIndex() => Toggle(SkinIndexKey, SkinIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Armature skin index", true)]
-        private static bool ValidateSkinIndex() {
-            Menu.SetChecked("Tools/QuickFury/Optimizations/Armature skin index", SkinIndex);
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(SkinIndexMenu, true)]
+        private static bool ValidateSkinIndex() => ValidateOptimization(SkinIndexMenu, SkinIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Armature destroy index")]
-        private static void ToggleDestroyIndex() {
-            EditorPrefs.SetBool(DestroyIndexKey, !DestroyIndex);
-        }
+        [MenuItem(DestroyIndexMenu)]
+        private static void ToggleDestroyIndex() => Toggle(DestroyIndexKey, DestroyIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Armature destroy index", true)]
-        private static bool ValidateDestroyIndex() {
-            Menu.SetChecked("Tools/QuickFury/Optimizations/Armature destroy index", DestroyIndex);
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(DestroyIndexMenu, true)]
+        private static bool ValidateDestroyIndex() => ValidateOptimization(DestroyIndexMenu, DestroyIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Skip Armature Link debug components")]
-        private static void ToggleSkipArmatureDebugInfo() {
-            EditorPrefs.SetBool(SkipArmatureDebugInfoKey, !SkipArmatureDebugInfo);
-        }
+        [MenuItem(SkipArmatureDebugInfoMenu)]
+        private static void ToggleSkipArmatureDebugInfo() =>
+            Toggle(SkipArmatureDebugInfoKey, SkipArmatureDebugInfo);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Skip Armature Link debug components", true)]
-        private static bool ValidateSkipArmatureDebugInfo() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Skip Armature Link debug components",
-                SkipArmatureDebugInfo
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(SkipArmatureDebugInfoMenu, true)]
+        private static bool ValidateSkipArmatureDebugInfo() =>
+            ValidateOptimization(SkipArmatureDebugInfoMenu, SkipArmatureDebugInfo);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Fast Armature Link moves")]
-        private static void ToggleFastArmatureMove() {
-            EditorPrefs.SetBool(FastArmatureMoveKey, !FastArmatureMove);
-        }
+        [MenuItem(FastArmatureMoveMenu)]
+        private static void ToggleFastArmatureMove() => Toggle(FastArmatureMoveKey, FastArmatureMove);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Fast Armature Link moves", true)]
-        private static bool ValidateFastArmatureMove() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Fast Armature Link moves",
-                FastArmatureMove
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(FastArmatureMoveMenu, true)]
+        private static bool ValidateFastArmatureMove() =>
+            ValidateOptimization(FastArmatureMoveMenu, FastArmatureMove);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Skip inert Transform asset scans")]
-        private static void ToggleSkipTransformAssetScan() {
-            EditorPrefs.SetBool(SkipTransformAssetScanKey, !SkipTransformAssetScan);
-        }
+        [MenuItem(SkipTransformAssetScanMenu)]
+        private static void ToggleSkipTransformAssetScan() =>
+            Toggle(SkipTransformAssetScanKey, SkipTransformAssetScan);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Skip inert Transform asset scans", true)]
-        private static bool ValidateSkipTransformAssetScan() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Skip inert Transform asset scans",
-                SkipTransformAssetScan
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(SkipTransformAssetScanMenu, true)]
+        private static bool ValidateSkipTransformAssetScan() =>
+            ValidateOptimization(SkipTransformAssetScanMenu, SkipTransformAssetScan);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Skip duplicate renderer asset scan")]
-        private static void ToggleSkipDuplicateRendererAssetScan() {
-            EditorPrefs.SetBool(SkipDuplicateRendererAssetScanKey, !SkipDuplicateRendererAssetScan);
-        }
+        [MenuItem(SkipDuplicateRendererAssetScanMenu)]
+        private static void ToggleSkipDuplicateRendererAssetScan() =>
+            Toggle(SkipDuplicateRendererAssetScanKey, SkipDuplicateRendererAssetScan);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Skip duplicate renderer asset scan", true)]
-        private static bool ValidateSkipDuplicateRendererAssetScan() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Skip duplicate renderer asset scan",
-                SkipDuplicateRendererAssetScan
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(SkipDuplicateRendererAssetScanMenu, true)]
+        private static bool ValidateSkipDuplicateRendererAssetScan() =>
+            ValidateOptimization(SkipDuplicateRendererAssetScanMenu, SkipDuplicateRendererAssetScan);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Retain SaveAssets batching (Unity 2022)")]
-        private static void ToggleRetainSaveAssetsBatching() {
-            EditorPrefs.SetBool(RetainSaveAssetsBatchingKey, !RetainSaveAssetsBatching);
-        }
+        [MenuItem(RetainSaveAssetsBatchingMenu)]
+        private static void ToggleRetainSaveAssetsBatching() =>
+            Toggle(RetainSaveAssetsBatchingKey, RetainSaveAssetsBatching);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Retain SaveAssets batching (Unity 2022)", true)]
+        [MenuItem(RetainSaveAssetsBatchingMenu, true)]
         private static bool ValidateRetainSaveAssetsBatching() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Retain SaveAssets batching (Unity 2022)",
-                RetainSaveAssetsBatching
+            return Validate(
+                RetainSaveAssetsBatchingMenu,
+                RetainSaveAssetsBatching,
+                QuickFuryBootstrap.OptimizationCompatible && Application.unityVersion.StartsWith("2022.")
             );
-            return QuickFuryBootstrap.OptimizationCompatible && Application.unityVersion.StartsWith("2022.");
         }
 
-        [MenuItem("Tools/QuickFury/Optimizations/Fast generated-asset discovery")]
-        private static void ToggleFastSaveAssetDiscovery() {
-            EditorPrefs.SetBool(FastSaveAssetDiscoveryKey, !FastSaveAssetDiscovery);
-        }
+        [MenuItem(FastSaveAssetDiscoveryMenu)]
+        private static void ToggleFastSaveAssetDiscovery() =>
+            Toggle(FastSaveAssetDiscoveryKey, FastSaveAssetDiscovery);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Fast generated-asset discovery", true)]
-        private static bool ValidateFastSaveAssetDiscovery() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Fast generated-asset discovery",
-                FastSaveAssetDiscovery
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(FastSaveAssetDiscoveryMenu, true)]
+        private static bool ValidateFastSaveAssetDiscovery() =>
+            ValidateOptimization(FastSaveAssetDiscoveryMenu, FastSaveAssetDiscovery);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Fast controller asset graph")]
-        private static void ToggleFastControllerAssetGraph() {
-            EditorPrefs.SetBool(FastControllerAssetGraphKey, !FastControllerAssetGraph);
-        }
+        [MenuItem(FastControllerAssetGraphMenu)]
+        private static void ToggleFastControllerAssetGraph() =>
+            Toggle(FastControllerAssetGraphKey, FastControllerAssetGraph);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Fast controller asset graph", true)]
-        private static bool ValidateFastControllerAssetGraph() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Fast controller asset graph",
-                FastControllerAssetGraph
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(FastControllerAssetGraphMenu, true)]
+        private static bool ValidateFastControllerAssetGraph() =>
+            ValidateOptimization(FastControllerAssetGraphMenu, FastControllerAssetGraph);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Consolidate generated asset files")]
-        private static void ToggleConsolidatedAssetContainer() {
-            EditorPrefs.SetBool(ConsolidatedAssetContainerKey, !ConsolidatedAssetContainer);
-        }
+        [MenuItem(ConsolidatedAssetContainerMenu)]
+        private static void ToggleConsolidatedAssetContainer() =>
+            Toggle(ConsolidatedAssetContainerKey, ConsolidatedAssetContainer);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Consolidate generated asset files", true)]
-        private static bool ValidateConsolidatedAssetContainer() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Consolidate generated asset files",
-                ConsolidatedAssetContainer
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(ConsolidatedAssetContainerMenu, true)]
+        private static bool ValidateConsolidatedAssetContainer() =>
+            ValidateOptimization(ConsolidatedAssetContainerMenu, ConsolidatedAssetContainer);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Cache blendshape controller bindings")]
-        private static void ToggleBlendshapeBindingCache() {
-            EditorPrefs.SetBool(BlendshapeBindingCacheKey, !BlendshapeBindingCache);
-        }
+        [MenuItem(BlendshapeBindingCacheMenu)]
+        private static void ToggleBlendshapeBindingCache() =>
+            Toggle(BlendshapeBindingCacheKey, BlendshapeBindingCache);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Cache blendshape controller bindings", true)]
-        private static bool ValidateBlendshapeBindingCache() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Cache blendshape controller bindings",
-                BlendshapeBindingCache
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(BlendshapeBindingCacheMenu, true)]
+        private static bool ValidateBlendshapeBindingCache() =>
+            ValidateOptimization(BlendshapeBindingCacheMenu, BlendshapeBindingCache);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Skip covered SPS mesh probes")]
-        private static void ToggleSpsCoveredRenderer() {
-            EditorPrefs.SetBool(SpsCoveredRendererKey, !SpsCoveredRenderer);
-        }
+        [MenuItem(SpsCoveredRendererMenu)]
+        private static void ToggleSpsCoveredRenderer() => Toggle(SpsCoveredRendererKey, SpsCoveredRenderer);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Skip covered SPS mesh probes", true)]
-        private static bool ValidateSpsCoveredRenderer() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Skip covered SPS mesh probes",
-                SpsCoveredRenderer
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(SpsCoveredRendererMenu, true)]
+        private static bool ValidateSpsCoveredRenderer() =>
+            ValidateOptimization(SpsCoveredRendererMenu, SpsCoveredRenderer);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Cache DPS-TPS material probes")]
-        private static void ToggleSpsMaterialProbeCache() {
-            EditorPrefs.SetBool(SpsMaterialProbeCacheKey, !SpsMaterialProbeCache);
-        }
+        [MenuItem(SpsMaterialProbeCacheMenu)]
+        private static void ToggleSpsMaterialProbeCache() =>
+            Toggle(SpsMaterialProbeCacheKey, SpsMaterialProbeCache);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Cache DPS-TPS material probes", true)]
-        private static bool ValidateSpsMaterialProbeCache() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Cache DPS-TPS material probes",
-                SpsMaterialProbeCache
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(SpsMaterialProbeCacheMenu, true)]
+        private static bool ValidateSpsMaterialProbeCache() =>
+            ValidateOptimization(SpsMaterialProbeCacheMenu, SpsMaterialProbeCache);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Controller parameter index")]
-        private static void ToggleControllerParameterIndex() {
-            EditorPrefs.SetBool(ControllerParameterIndexKey, !ControllerParameterIndex);
-        }
+        [MenuItem(ControllerParameterIndexMenu)]
+        private static void ToggleControllerParameterIndex() =>
+            Toggle(ControllerParameterIndexKey, ControllerParameterIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Controller parameter index", true)]
-        private static bool ValidateControllerParameterIndex() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Controller parameter index",
-                ControllerParameterIndex
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(ControllerParameterIndexMenu, true)]
+        private static bool ValidateControllerParameterIndex() =>
+            ValidateOptimization(ControllerParameterIndexMenu, ControllerParameterIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Layer-to-tree layer index")]
-        private static void ToggleLayerToTreeLayerIndex() {
-            EditorPrefs.SetBool(LayerToTreeLayerIndexKey, !LayerToTreeLayerIndex);
-        }
+        [MenuItem(LayerToTreeLayerIndexMenu)]
+        private static void ToggleLayerToTreeLayerIndex() =>
+            Toggle(LayerToTreeLayerIndexKey, LayerToTreeLayerIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Layer-to-tree layer index", true)]
-        private static bool ValidateLayerToTreeLayerIndex() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Layer-to-tree layer index",
-                LayerToTreeLayerIndex
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(LayerToTreeLayerIndexMenu, true)]
+        private static bool ValidateLayerToTreeLayerIndex() =>
+            ValidateOptimization(LayerToTreeLayerIndexMenu, LayerToTreeLayerIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Tracking behaviour index")]
-        private static void ToggleTrackingBehaviourIndex() {
-            EditorPrefs.SetBool(TrackingBehaviourIndexKey, !TrackingBehaviourIndex);
-        }
+        [MenuItem(TrackingBehaviourIndexMenu)]
+        private static void ToggleTrackingBehaviourIndex() =>
+            Toggle(TrackingBehaviourIndexKey, TrackingBehaviourIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Tracking behaviour index", true)]
-        private static bool ValidateTrackingBehaviourIndex() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Tracking behaviour index",
-                TrackingBehaviourIndex
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(TrackingBehaviourIndexMenu, true)]
+        private static bool ValidateTrackingBehaviourIndex() =>
+            ValidateOptimization(TrackingBehaviourIndexMenu, TrackingBehaviourIndex);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Filter irrelevant behaviour containers")]
-        private static void ToggleBehaviourContainerFilter() {
-            EditorPrefs.SetBool(BehaviourContainerFilterKey, !BehaviourContainerFilter);
-        }
+        [MenuItem(BehaviourContainerFilterMenu)]
+        private static void ToggleBehaviourContainerFilter() =>
+            Toggle(BehaviourContainerFilterKey, BehaviourContainerFilter);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Filter irrelevant behaviour containers", true)]
-        private static bool ValidateBehaviourContainerFilter() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Filter irrelevant behaviour containers",
-                BehaviourContainerFilter
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(BehaviourContainerFilterMenu, true)]
+        private static bool ValidateBehaviourContainerFilter() =>
+            ValidateOptimization(BehaviourContainerFilterMenu, BehaviourContainerFilter);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Deduplicate generated animation clips")]
-        private static void ToggleDeduplicateGeneratedClips() {
-            EditorPrefs.SetBool(DeduplicateGeneratedClipsKey, !DeduplicateGeneratedClips);
-        }
+        [MenuItem(DeduplicateGeneratedClipsMenu)]
+        private static void ToggleDeduplicateGeneratedClips() =>
+            Toggle(DeduplicateGeneratedClipsKey, DeduplicateGeneratedClips);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Deduplicate generated animation clips", true)]
-        private static bool ValidateDeduplicateGeneratedClips() {
-            Menu.SetChecked(
-                "Tools/QuickFury/Optimizations/Deduplicate generated animation clips",
-                DeduplicateGeneratedClips
-            );
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(DeduplicateGeneratedClipsMenu, true)]
+        private static bool ValidateDeduplicateGeneratedClips() =>
+            ValidateOptimization(DeduplicateGeneratedClipsMenu, DeduplicateGeneratedClips);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Ordered animation path rewrite")]
-        private static void ToggleOrderedPaths() {
-            EditorPrefs.SetBool(OptimizeOrderedPathsKey, !OptimizeOrderedPaths);
-        }
+        [MenuItem(OrderedPathsMenu)]
+        private static void ToggleOrderedPaths() => Toggle(OptimizeOrderedPathsKey, OptimizeOrderedPaths);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Ordered animation path rewrite", true)]
-        private static bool ValidateOrderedPaths() {
-            Menu.SetChecked("Tools/QuickFury/Optimizations/Ordered animation path rewrite", OptimizeOrderedPaths);
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(OrderedPathsMenu, true)]
+        private static bool ValidateOrderedPaths() =>
+            ValidateOptimization(OrderedPathsMenu, OptimizeOrderedPaths);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Skip empty deferred rewrite")]
-        private static void ToggleEmptyDeferredRewrite() {
-            EditorPrefs.SetBool(SkipEmptyDeferredRewriteKey, !SkipEmptyDeferredRewrite);
-        }
+        [MenuItem(EmptyDeferredRewriteMenu)]
+        private static void ToggleEmptyDeferredRewrite() =>
+            Toggle(SkipEmptyDeferredRewriteKey, SkipEmptyDeferredRewrite);
 
-        [MenuItem("Tools/QuickFury/Optimizations/Skip empty deferred rewrite", true)]
-        private static bool ValidateEmptyDeferredRewrite() {
-            Menu.SetChecked("Tools/QuickFury/Optimizations/Skip empty deferred rewrite", SkipEmptyDeferredRewrite);
-            return QuickFuryBootstrap.OptimizationCompatible;
-        }
+        [MenuItem(EmptyDeferredRewriteMenu, true)]
+        private static bool ValidateEmptyDeferredRewrite() =>
+            ValidateOptimization(EmptyDeferredRewriteMenu, SkipEmptyDeferredRewrite);
 
-        [MenuItem("Tools/QuickFury/Profiling/Detailed internal timings")]
-        private static void ToggleDetailedProfiling() {
-            EditorPrefs.SetBool(DetailedProfilingKey, !DetailedProfiling);
-        }
+        [MenuItem(DetailedProfilingMenu)]
+        private static void ToggleDetailedProfiling() => Toggle(DetailedProfilingKey, DetailedProfiling);
 
-        [MenuItem("Tools/QuickFury/Profiling/Detailed internal timings", true)]
-        private static bool ValidateDetailedProfiling() {
-            Menu.SetChecked("Tools/QuickFury/Profiling/Detailed internal timings", DetailedProfiling);
-            return QuickFuryBootstrap.ProfilingAvailable;
-        }
+        [MenuItem(DetailedProfilingMenu, true)]
+        private static bool ValidateDetailedProfiling() =>
+            Validate(DetailedProfilingMenu, DetailedProfiling, QuickFuryBootstrap.ProfilingAvailable);
 
-        [MenuItem("Tools/QuickFury/Profiling/Log last report")]
+        [MenuItem(ProfilingMenu + "Log last report")]
         private static void LogLastReport() {
             var report = QuickFuryProfilerApi.LastReport;
             Debug.Log(string.IsNullOrEmpty(report) ? "[QuickFury] No profile has completed yet." : report);
+        }
+
+        private static void Toggle(string key, bool enabled) {
+            EditorPrefs.SetBool(key, !enabled);
+        }
+
+        private static bool ValidateOptimization(string menuPath, bool enabled) {
+            return Validate(menuPath, enabled, QuickFuryBootstrap.OptimizationCompatible);
+        }
+
+        private static bool Validate(string menuPath, bool enabled, bool available) {
+            Menu.SetChecked(menuPath, enabled);
+            return available;
         }
     }
 }

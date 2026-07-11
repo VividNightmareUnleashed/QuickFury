@@ -26,6 +26,9 @@ namespace QuickFury {
         [ThreadStatic] private static Context active;
         private static FieldInfo stateMachineField;
         private static object emptyContainers;
+        private static Type playableLayerControlType;
+        private static Type parameterDriverType;
+        private static Type animatorLayerControlType;
 
         internal static object EmptyContainerSet => emptyContainers;
 
@@ -47,13 +50,13 @@ namespace QuickFury {
                 return;
             }
 
-            var playableLayerControl = VrcfuryCompatibility.FindType(
+            playableLayerControlType = VrcfuryCompatibility.FindType(
                 "VRC.SDK3.Avatars.Components.VRCPlayableLayerControl"
             );
-            var parameterDriver = VrcfuryCompatibility.FindType(
+            parameterDriverType = VrcfuryCompatibility.FindType(
                 "VRC.SDK3.Avatars.Components.VRCAvatarParameterDriver"
             );
-            var animatorLayerControl = VrcfuryCompatibility.FindType(
+            animatorLayerControlType = VrcfuryCompatibility.FindType(
                 "VRC.SDK3.Avatars.Components.VRCAnimatorLayerControl"
             );
 
@@ -61,9 +64,9 @@ namespace QuickFury {
             var syncedDriverApply = FindNoArgVoid("VF.Service.MakeAllSyncedDriversLocalService", "Apply");
             var layerControlFix = FindNoArgVoid("VF.Service.AnimatorLayerControlOffsetService", "Fix");
 
-            if (playableLayerControl == null || parameterDriver == null || animatorLayerControl == null
-                                             || actionApply == null || syncedDriverApply == null
-                                             || layerControlFix == null) {
+            if (playableLayerControlType == null || parameterDriverType == null || animatorLayerControlType == null
+                                              || actionApply == null || syncedDriverApply == null
+                                              || layerControlFix == null) {
                 Debug.LogWarning("[QuickFury] Behaviour container filter disabled: service target mismatch.");
                 return;
             }
@@ -72,20 +75,17 @@ namespace QuickFury {
                 PatchPhase(
                     harmony,
                     actionApply,
-                    nameof(BeginPlayableLayerControls),
-                    playableLayerControl
+                    nameof(BeginPlayableLayerControls)
                 );
                 PatchPhase(
                     harmony,
                     syncedDriverApply,
-                    nameof(BeginParameterDrivers),
-                    parameterDriver
+                    nameof(BeginParameterDrivers)
                 );
                 PatchPhase(
                     harmony,
                     layerControlFix,
-                    nameof(BeginAnimatorLayerControls),
-                    animatorLayerControl
+                    nameof(BeginAnimatorLayerControls)
                 );
             } catch (Exception e) {
                 active = null;
@@ -104,10 +104,8 @@ namespace QuickFury {
         private static void PatchPhase(
             Harmony harmony,
             MethodInfo method,
-            string prefixName,
-            Type behaviourType
+            string prefixName
         ) {
-            PhaseTypes[prefixName] = behaviourType;
             harmony.Patch(
                 method,
                 prefix: new HarmonyMethod(typeof(BehaviourContainerFilterPatch), prefixName),
@@ -115,23 +113,21 @@ namespace QuickFury {
             );
         }
 
-        private static readonly Dictionary<string, Type> PhaseTypes = new Dictionary<string, Type>();
-
         private static void BeginPlayableLayerControls() {
-            Begin(nameof(BeginPlayableLayerControls), "playableLayerControl");
+            Begin(playableLayerControlType, "playableLayerControl");
         }
 
         private static void BeginParameterDrivers() {
-            Begin(nameof(BeginParameterDrivers), "parameterDriver");
+            Begin(parameterDriverType, "parameterDriver");
         }
 
         private static void BeginAnimatorLayerControls() {
-            Begin(nameof(BeginAnimatorLayerControls), "animatorLayerControl");
+            Begin(animatorLayerControlType, "animatorLayerControl");
         }
 
-        private static void Begin(string key, string name) {
+        private static void Begin(Type behaviourType, string name) {
             active = QuickFurySettings.BehaviourContainerFilter
-                ? new Context { Name = name, BehaviourType = PhaseTypes[key] }
+                ? new Context { Name = name, BehaviourType = behaviourType }
                 : null;
         }
 

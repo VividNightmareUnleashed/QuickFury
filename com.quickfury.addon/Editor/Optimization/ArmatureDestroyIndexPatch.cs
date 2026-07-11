@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 using HarmonyLib;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -198,7 +197,7 @@ namespace QuickFury {
                 }
             }
 
-            var constraints = InvokeUnwrapped(
+            var constraints = VrcfuryCompatibility.InvokeUnwrapped(
                 getConstraints,
                 __instance,
                 new object[] { false, true }
@@ -207,7 +206,7 @@ namespace QuickFury {
                 throw new InvalidOperationException("VRCFury GetConstraints returned a non-enumerable result.");
             }
             foreach (var constraint in constraints) {
-                InvokeUnwrapped(destroyConstraint, constraint, null);
+                VrcfuryCompatibility.InvokeUnwrapped(destroyConstraint, constraint, null);
             }
 
             Object.DestroyImmediate(targetObject);
@@ -215,7 +214,7 @@ namespace QuickFury {
         }
 
         private static List<GameObject> ReadUploadRoots(object vfGameObject) {
-            var roots = InvokeUnwrapped(getUploadRoots, vfGameObject, null) as IEnumerable;
+            var roots = VrcfuryCompatibility.InvokeUnwrapped(getUploadRoots, vfGameObject, null) as IEnumerable;
             if (roots == null) return null;
 
             var output = new List<GameObject>();
@@ -261,7 +260,11 @@ namespace QuickFury {
                 BuildBucketIfNeeded(category, uploadBucket);
                 foreach (var component in uploadBucket.Components) {
                     if (component == null) continue;
-                    var root = InvokeUnwrapped(category.GetRootTransform, component, null) as Transform;
+                    var root = VrcfuryCompatibility.InvokeUnwrapped(
+                        category.GetRootTransform,
+                        component,
+                        null
+                    ) as Transform;
                     if (root == null) continue;
                     var id = root.GetInstanceID();
                     if (!category.ByComponentRoot.TryGetValue(id, out var rootBucket)) {
@@ -284,15 +287,6 @@ namespace QuickFury {
                 if (left[i] != right[i]) return false;
             }
             return true;
-        }
-
-        private static object InvokeUnwrapped(MethodInfo method, object instance, object[] args) {
-            try {
-                return method.Invoke(instance, args);
-            } catch (TargetInvocationException e) when (e.InnerException != null) {
-                ExceptionDispatchInfo.Capture(e.InnerException).Throw();
-                throw;
-            }
         }
     }
 }

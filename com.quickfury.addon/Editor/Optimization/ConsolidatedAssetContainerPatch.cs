@@ -1,7 +1,6 @@
 using System;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 using HarmonyLib;
 using UnityEditor.Animations;
 using UnityEngine;
@@ -18,7 +17,6 @@ namespace QuickFury {
         private sealed class Context {
             internal Object Container;
             internal bool CreatingContainer;
-            internal bool Enabled;
         }
 
         [ThreadStatic] private static Context active;
@@ -76,7 +74,7 @@ namespace QuickFury {
         }
 
         private static void Begin() {
-            active = new Context { Enabled = QuickFurySettings.ConsolidatedAssetContainer };
+            active = QuickFurySettings.ConsolidatedAssetContainer ? new Context() : null;
         }
 
         private static Exception End(Exception __exception) {
@@ -86,7 +84,7 @@ namespace QuickFury {
 
         private static bool Save(Object obj, string dir) {
             var context = active;
-            if (context == null || !context.Enabled || context.CreatingContainer
+            if (context == null || context.CreatingContainer
                                 || obj == null || obj is AnimatorController) return true;
 
             try {
@@ -95,7 +93,7 @@ namespace QuickFury {
                     context.Container.name = "VRCFury Generated Assets";
                     context.CreatingContainer = true;
                     try {
-                        InvokeUnwrapped(
+                        VrcfuryCompatibility.InvokeUnwrapped(
                             saveAsset,
                             null,
                             new object[] { context.Container, dir, "VRCFury Generated Assets" }
@@ -105,23 +103,14 @@ namespace QuickFury {
                     }
                 }
 
-                InvokeUnwrapped(attachAsset, null, new[] { obj, context.Container });
+                VrcfuryCompatibility.InvokeUnwrapped(attachAsset, null, new[] { obj, context.Container });
                 return false;
             } catch (Exception e) {
-                context.Enabled = false;
+                active = null;
                 Debug.LogWarning(
                     "[QuickFury] Consolidated asset container fell back to separate files: " + e.Message
                 );
                 return true;
-            }
-        }
-
-        private static object InvokeUnwrapped(MethodInfo method, object instance, object[] args) {
-            try {
-                return method.Invoke(instance, args);
-            } catch (TargetInvocationException e) when (e.InnerException != null) {
-                ExceptionDispatchInfo.Capture(e.InnerException).Throw();
-                throw;
             }
         }
     }
