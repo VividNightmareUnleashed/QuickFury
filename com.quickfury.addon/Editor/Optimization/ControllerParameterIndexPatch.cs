@@ -25,17 +25,19 @@ namespace QuickFury {
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
             var type = VrcfuryCompatibility.FindType("VF.Utils.Controller.VFController");
             controllerField = type?.GetField("ctrl", BindingFlags.Instance | BindingFlags.NonPublic);
-            var getParam = type?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "GetParam"
-                                           && method.ReturnType == typeof(AnimatorControllerParameter)
-                                           && method.GetParameters().Length == 1
-                                           && method.GetParameters()[0].ParameterType == typeof(string));
-            var newParam = type?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "_NewParam"
-                                           && method.ReturnType == typeof(AnimatorControllerParameter)
-                                           && method.GetParameters().Length == 3);
+            var getParam = VrcfuryCompatibility.FindUniqueMethod(
+                type,
+                "GetParam",
+                method => method.ReturnType == typeof(AnimatorControllerParameter)
+                          && method.GetParameters().Length == 1
+                          && method.GetParameters()[0].ParameterType == typeof(string)
+            );
+            var newParam = VrcfuryCompatibility.FindUniqueMethod(
+                type,
+                "_NewParam",
+                method => method.ReturnType == typeof(AnimatorControllerParameter)
+                          && method.GetParameters().Length == 3
+            );
             var mutators = type?
                 .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .Where(method => new[] {

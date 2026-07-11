@@ -1,8 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
@@ -15,40 +13,43 @@ namespace QuickFury {
     /// </summary>
     internal static class SpsCoveredRendererPatch {
         private sealed class Context {
-            internal Type PlugType;
             internal int Probes;
             internal int Skipped;
-            internal readonly List<Transform> CoveredOwners = new List<Transform>();
-            internal readonly HashSet<int> CoveredOwnerIds = new HashSet<int>();
+            internal readonly HashSet<Transform> CoveredOwners = new HashSet<Transform>();
 
             internal void AddOwner(Transform owner) {
-                if (owner == null || !CoveredOwnerIds.Add(owner.GetInstanceID())) return;
-                CoveredOwners.Add(owner);
+                if (owner != null) CoveredOwners.Add(owner);
             }
         }
 
         [ThreadStatic] private static Context active;
+        private static Type plugComponentType;
         internal static string LastStats { get; private set; } = "none";
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
             var upgraderType = VrcfuryCompatibility.FindType("VF.Builder.Haptics.SpsUpgrader");
             var plugEditorType = VrcfuryCompatibility.FindType("VF.Inspector.VRCFuryHapticPlugEditor");
             var sizeDetectorType = VrcfuryCompatibility.FindType("VF.Builder.Haptics.PlugSizeDetector");
-            var plugType = VrcfuryCompatibility.FindType("VF.Component.VRCFuryHapticPlug");
+            plugComponentType = VrcfuryCompatibility.FindType("VF.Component.VRCFuryHapticPlug");
 
-            var apply = upgraderType?.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Apply" && method.GetParameters().Length == 3);
-            var getRenderers = plugEditorType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "GetRenderers"
-                                           && method.GetParameters().Length == 1);
-            var getAutoWorldSize = sizeDetectorType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "GetAutoWorldSize"
-                                           && method.GetParameters().Length == 1
-                                           && method.GetParameters()[0].ParameterType == typeof(Renderer));
+            var apply = VrcfuryCompatibility.FindUniqueMethod(
+                upgraderType,
+                "Apply",
+                method => method.GetParameters().Length == 3
+            );
+            var getRenderers = VrcfuryCompatibility.FindUniqueMethod(
+                plugEditorType,
+                "GetRenderers",
+                method => method.GetParameters().Length == 1
+            );
+            var getAutoWorldSize = VrcfuryCompatibility.FindUniqueMethod(
+                sizeDetectorType,
+                "GetAutoWorldSize",
+                method => method.GetParameters().Length == 1
+                          && method.GetParameters()[0].ParameterType == typeof(Renderer)
+            );
 
-            if (apply == null || getRenderers == null || getAutoWorldSize == null || plugType == null) {
+            if (apply == null || getRenderers == null || getAutoWorldSize == null || plugComponentType == null) {
                 Debug.LogWarning("[QuickFury] Covered SPS mesh probe skip disabled: target signature mismatch.");
                 return;
             }
@@ -70,17 +71,13 @@ namespace QuickFury {
             } catch (Exception e) {
                 Debug.LogWarning("[QuickFury] Covered SPS mesh probe skip disabled: " + e.Message);
             }
-
-            plugComponentType = plugType;
         }
-
-        private static Type plugComponentType;
 
         private static void Begin(object mode) {
             active = QuickFurySettings.SpsCoveredRenderer
                      && mode != null
                      && mode.ToString() == "AutomatedForEveryone"
-                ? new Context { PlugType = plugComponentType }
+                ? new Context()
                 : null;
         }
 
@@ -119,14 +116,18 @@ namespace QuickFury {
                 }
 
                 // Unbaking earlier in SpsUpgrader.Apply can add a plug after the initial
-                // GetRenderers pass. Include those live components as well.
+                // GetRenderers pass. Include those live components as well, and remember
+                // them so other renderers under the same plug take the list path above.
                 for (var current = owner; current != null; current = current.parent) {
-                    if (current.GetComponent(context.PlugType) != null) {
+                    if (current.GetComponent(plugComponentType) != null) {
+                        context.AddOwner(current);
                         context.Skipped++;
                         return false;
                     }
                 }
-                if (owner.GetComponentsInChildren(context.PlugType, true).Length > 0) {
+                var childPlug = owner.GetComponentInChildren(plugComponentType, true);
+                if (childPlug != null) {
+                    context.AddOwner(childPlug.transform);
                     context.Skipped++;
                     return false;
                 }

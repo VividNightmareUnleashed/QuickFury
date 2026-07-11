@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
@@ -14,12 +13,7 @@ namespace QuickFury {
         [ThreadStatic] private static int saveAssetsDepth;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
-            var saveAssetsType = compatibility.AvatarEditorAssembly.GetType("VF.Service.SaveAssetsService", false);
-            var run = VrcfuryCompatibility.FindUniqueMethod(
-                saveAssetsType,
-                "Run",
-                method => method.ReturnType == typeof(void) && method.GetParameters().Length == 0
-            );
+            var run = compatibility.SaveAssetsRun;
 
             var assetDatabaseType = VrcfuryCompatibility.FindType("VF.Utils.VRCFuryAssetDatabase");
             var withoutAssetEditing = VrcfuryCompatibility.FindUniqueMethod(
@@ -60,7 +54,7 @@ namespace QuickFury {
         }
 
         private static void RunPrefix(out bool __state) {
-            __state = QuickFurySettings.RetainSaveAssetsBatching && IsUnity2022();
+            __state = QuickFurySettings.RetainSaveAssetsBatching && QuickFurySettings.IsUnity2022;
             if (__state) saveAssetsDepth++;
         }
 
@@ -74,10 +68,6 @@ namespace QuickFury {
 
             go();
             return false;
-        }
-
-        private static bool IsUnity2022() {
-            return Application.unityVersion.StartsWith("2022.", StringComparison.Ordinal);
         }
     }
 }

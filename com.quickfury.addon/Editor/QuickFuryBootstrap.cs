@@ -27,27 +27,28 @@ namespace QuickFury {
                 return;
             }
 
-            ProfilePatches.Install(Harmony, compatibility);
+            Install("Profiling", ProfilePatches.Install);
 
             if (compatibility.OptimizationCompatible) {
-                OrderedPathRewritePatch.Install(Harmony, compatibility);
-                ArmatureConstraintIndexPatch.Install(Harmony, compatibility);
-                ArmaturePhysboneIndexPatch.Install(Harmony, compatibility);
-                ArmatureSkinIndexPatch.Install(Harmony, compatibility);
-                ArmatureDestroyIndexPatch.Install(Harmony, compatibility);
-                ArmatureDebugInfoPatch.Install(Harmony, compatibility);
-                FastArmatureMovePatch.Install(Harmony, compatibility);
-                SaveAssetsDuplicateScanPatch.Install(Harmony, compatibility);
-                SaveAssetsBatchingPatch.Install(Harmony, compatibility);
-                ConsolidatedAssetContainerPatch.Install(Harmony, compatibility);
-                FastControllerAssetGraphPatch.Install(Harmony, compatibility);
-                BlendshapeBindingCachePatch.Install(Harmony, compatibility);
-                SpsCoveredRendererPatch.Install(Harmony, compatibility);
-                SpsMaterialProbeCachePatch.Install(Harmony, compatibility);
-                ControllerParameterIndexPatch.Install(Harmony, compatibility);
-                LayerToTreeLayerIndexPatch.Install(Harmony, compatibility);
-                TrackingBehaviourIndexPatch.Install(Harmony, compatibility);
-                BehaviourContainerFilterPatch.Install(Harmony, compatibility);
+                Install("Shared armature reflection", (harmony, targets) => ArmatureReflection.Resolve());
+                Install("Ordered path rewrite", OrderedPathRewritePatch.Install);
+                Install("Armature constraint index", ArmatureConstraintIndexPatch.Install);
+                Install("Armature PhysBone index", ArmaturePhysboneIndexPatch.Install);
+                Install("Batched Armature skin rewrite", ArmatureSkinIndexPatch.Install);
+                Install("Armature destroy index", ArmatureDestroyIndexPatch.Install);
+                Install("Armature debug-component suppression", ArmatureDebugInfoPatch.Install);
+                Install("Fast Armature Link moves", FastArmatureMovePatch.Install);
+                Install("Fast SaveAssets discovery", SaveAssetsDuplicateScanPatch.Install);
+                Install("SaveAssets batching", SaveAssetsBatchingPatch.Install);
+                Install("Consolidated asset container", ConsolidatedAssetContainerPatch.Install);
+                Install("Fast controller asset graph", FastControllerAssetGraphPatch.Install);
+                Install("Blendshape binding cache", BlendshapeBindingCachePatch.Install);
+                Install("Covered SPS mesh probe skip", SpsCoveredRendererPatch.Install);
+                Install("SPS material probe cache", SpsMaterialProbeCachePatch.Install);
+                Install("Controller parameter index", ControllerParameterIndexPatch.Install);
+                Install("Layer-to-tree layer index", LayerToTreeLayerIndexPatch.Install);
+                Install("Tracking behaviour index", TrackingBehaviourIndexPatch.Install);
+                Install("Behaviour container filter", BehaviourContainerFilterPatch.Install);
             } else {
                 Debug.LogWarning(
                     $"[QuickFury] Profiling is active, but behavior-changing optimizations are disabled for " +
@@ -59,6 +60,16 @@ namespace QuickFury {
                 $"[QuickFury] Ready for VRCFury {compatibility.PackageVersion} " +
                 $"(MVID {compatibility.ModuleVersionId})."
             );
+        }
+
+        // A patch whose reflection throws (rather than reporting a mismatch) must not
+        // prevent the remaining patches from installing.
+        private static void Install(string name, Action<Harmony, VrcfuryCompatibility> install) {
+            try {
+                install(Harmony, compatibility);
+            } catch (Exception e) {
+                Debug.LogWarning($"[QuickFury] {name} disabled: {e.Message}");
+            }
         }
 
         private static void Unpatch() {

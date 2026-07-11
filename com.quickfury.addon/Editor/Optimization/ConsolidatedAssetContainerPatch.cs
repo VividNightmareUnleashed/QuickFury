@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using UnityEditor.Animations;
@@ -25,33 +24,31 @@ namespace QuickFury {
         private static MethodInfo attachAsset;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
-            var saveAssetsType = compatibility.AvatarEditorAssembly.GetType("VF.Service.SaveAssetsService", false);
-            var run = saveAssetsType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Run"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 0);
+            var run = compatibility.SaveAssetsRun;
             var databaseType = VrcfuryCompatibility.FindType("VF.Utils.VRCFuryAssetDatabase");
             containerType = VrcfuryCompatibility.FindType(
                 "VF.Utils.VRCFuryAssetDatabase+BinaryContainer"
             );
-            saveAsset = databaseType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => {
-                    if (method.Name != "SaveAsset" || method.ReturnType != typeof(void)) return false;
+            saveAsset = VrcfuryCompatibility.FindUniqueMethod(
+                databaseType,
+                "SaveAsset",
+                method => {
+                    if (method.ReturnType != typeof(void)) return false;
                     var parameters = method.GetParameters();
                     return parameters.Length == 3
                            && parameters[0].ParameterType == typeof(Object)
                            && parameters[1].ParameterType == typeof(string)
                            && parameters[2].ParameterType == typeof(string);
-                });
-            attachAsset = databaseType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "AttachAsset"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 2
-                                           && method.GetParameters()[0].ParameterType == typeof(Object)
-                                           && method.GetParameters()[1].ParameterType == typeof(Object));
+                }
+            );
+            attachAsset = VrcfuryCompatibility.FindUniqueMethod(
+                databaseType,
+                "AttachAsset",
+                method => method.ReturnType == typeof(void)
+                          && method.GetParameters().Length == 2
+                          && method.GetParameters()[0].ParameterType == typeof(Object)
+                          && method.GetParameters()[1].ParameterType == typeof(Object)
+            );
 
             if (run == null || containerType == null || saveAsset == null || attachAsset == null) {
                 Debug.LogWarning("[QuickFury] Consolidated asset container disabled: target mismatch.");

@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEditor;
@@ -50,15 +48,12 @@ namespace QuickFury {
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
             var type = VrcfuryCompatibility.FindType("VF.Feature.BlendshapeOptimizerBuilder");
-            var apply = type?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Apply"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 0);
-            var getBindings = type?.GetMethods(
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                )
-                .SingleOrDefault(method => method.Name == "GetBindings"
-                                           && method.GetParameters().Length == 2);
+            var apply = VrcfuryCompatibility.FindNoArgVoid(type, "Apply");
+            var getBindings = VrcfuryCompatibility.FindUniqueMethod(
+                type,
+                "GetBindings",
+                method => method.GetParameters().Length == 2
+            );
 
             if (apply == null || getBindings == null) {
                 Debug.LogWarning("[QuickFury] Blendshape binding cache disabled: target signature mismatch.");

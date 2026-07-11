@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using System.Text;
 using HarmonyLib;
 using UnityEditor;
@@ -18,15 +16,18 @@ namespace QuickFury {
         private const string CachePrefix = "com.quickfury.spsProbe.v1.";
         private static readonly Dictionary<string, Hash128> DependencyHashes =
             new Dictionary<string, Hash128>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, bool> ResultsByKey =
+            new Dictionary<string, bool>(StringComparer.Ordinal);
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
             var type = VrcfuryCompatibility.FindType("VF.Builder.Haptics.TpsConfigurer");
-            var target = type?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "HasDpsOrTpsMaterial"
-                                           && method.ReturnType == typeof(bool)
-                                           && method.GetParameters().Length == 1
-                                           && method.GetParameters()[0].ParameterType == typeof(Renderer));
+            var target = VrcfuryCompatibility.FindUniqueMethod(
+                type,
+                "HasDpsOrTpsMaterial",
+                method => method.ReturnType == typeof(bool)
+                          && method.GetParameters().Length == 1
+                          && method.GetParameters()[0].ParameterType == typeof(Renderer)
+            );
             if (target == null) {
                 Debug.LogWarning("[QuickFury] SPS material probe cache disabled: target signature mismatch.");
                 return;
@@ -38,9 +39,19 @@ namespace QuickFury {
                     prefix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(GetCached)),
                     postfix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(Store))
                 );
+                // The signature is only self-invalidating while the dependency hashes are
+                // current; a shader or material edit between two bakes must be observed.
+                harmony.Patch(
+                    compatibility.RunMain,
+                    prefix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(InvalidateDependencyHashes))
+                );
             } catch (Exception e) {
                 Debug.LogWarning("[QuickFury] SPS material probe cache disabled: " + e.Message);
             }
+        }
+
+        private static void InvalidateDependencyHashes() {
+            DependencyHashes.Clear();
         }
 
         private static bool GetCached(Renderer r, ref bool __result, out string __state) {
@@ -51,8 +62,15 @@ namespace QuickFury {
                 var signature = BuildSignature(r.sharedMaterials);
                 if (signature == null) return true;
                 var key = CachePrefix + Hash128.Compute(signature);
+                // The signature key is content-derived, so the in-memory mirror stays
+                // valid across bakes and saves a registry read per repeated probe.
+                if (ResultsByKey.TryGetValue(key, out var cached)) {
+                    __result = cached;
+                    return false;
+                }
                 if (EditorPrefs.HasKey(key)) {
                     __result = EditorPrefs.GetBool(key);
+                    ResultsByKey[key] = __result;
                     return false;
                 }
                 __state = key;
@@ -65,6 +83,7 @@ namespace QuickFury {
 
         private static void Store(string __state, bool __result) {
             if (string.IsNullOrEmpty(__state)) return;
+            ResultsByKey[__state] = __result;
             EditorPrefs.SetBool(__state, __result);
         }
 

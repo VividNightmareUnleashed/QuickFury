@@ -15,13 +15,9 @@ namespace QuickFury {
     /// and reuses them while preserving VRCFury's per-object filtering and destruction order.
     /// </summary>
     internal static class ArmatureDestroyIndexPatch {
-        private sealed class Category {
+        private sealed class CategoryTarget {
             internal Type ComponentType;
             internal MethodInfo GetRootTransform;
-            internal readonly List<RootBucket> Roots = new List<RootBucket>();
-            internal readonly Dictionary<int, List<IndexedComponent>> ByComponentRoot =
-                new Dictionary<int, List<IndexedComponent>>();
-            internal bool Indexed;
         }
 
         private sealed class IndexedComponent {
@@ -30,78 +26,45 @@ namespace QuickFury {
             internal GameObject UploadRoot;
         }
 
-        private sealed class RootBucket {
-            internal GameObject Root;
-            internal readonly List<Component> Components = new List<Component>();
-            internal bool Built;
-        }
-
         private sealed class Context {
             internal GameObject Avatar;
             internal List<GameObject> UploadRoots;
-            internal List<Category> Categories;
+            internal List<Dictionary<int, List<IndexedComponent>>> CategoryIndexes;
         }
 
         [ThreadStatic] private static Context active;
 
-        private static FieldInfo avatarObjectField;
-        private static FieldInfo gameObjectField;
         private static MethodInfo getUploadRoots;
-        private static MethodInfo getConstraints;
         private static MethodInfo destroyConstraint;
-        private static Category[] categoryTemplates;
+        private static CategoryTarget[] categoryTargets;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
-            var armatureType = VrcfuryCompatibility.FindType("VF.Service.ArmatureLinkService");
-            var vfGameObjectType = VrcfuryCompatibility.FindType("VF.Utils.VFGameObject");
             var constraintType = VrcfuryCompatibility.FindType("VF.Utils.VFConstraint");
 
-            var apply = armatureType?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Apply" && method.GetParameters().Length == 0);
-            var destroy = vfGameObjectType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Destroy"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 0);
-            getConstraints = vfGameObjectType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => {
-                    if (method.Name != "GetConstraints" || !method.ReturnType.IsArray) return false;
-                    var parameters = method.GetParameters();
-                    return parameters.Length == 2
-                           && parameters[0].ParameterType == typeof(bool)
-                           && parameters[1].ParameterType == typeof(bool);
-                });
-
-            avatarObjectField = armatureType?.GetField("avatarObject", BindingFlags.Instance | BindingFlags.NonPublic);
-            gameObjectField = vfGameObjectType?.GetField("_gameObject", BindingFlags.Instance | BindingFlags.NonPublic);
-            getUploadRoots = vfGameObjectType?
+            var destroy = VrcfuryCompatibility.FindNoArgVoid(ArmatureReflection.VfGameObjectType, "Destroy");
+            getUploadRoots = ArmatureReflection.VfGameObjectType?
                 .GetProperty("uploadRoots", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 ?.GetGetMethod(true);
-            destroyConstraint = constraintType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Destroy"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 0);
+            destroyConstraint = VrcfuryCompatibility.FindNoArgVoid(constraintType, "Destroy");
 
-            categoryTemplates = new[] {
-                CreateCategory("VRC.Dynamics.VRCPhysBoneBase"),
-                CreateCategory("VRC.Dynamics.VRCPhysBoneColliderBase"),
-                CreateCategory("VRC.Dynamics.ContactBase")
+            categoryTargets = new[] {
+                CreateCategoryTarget("VRC.Dynamics.VRCPhysBoneBase"),
+                CreateCategoryTarget("VRC.Dynamics.VRCPhysBoneColliderBase"),
+                CreateCategoryTarget("VRC.Dynamics.ContactBase")
             };
 
-            if (apply == null || destroy == null || getConstraints == null || constraintType == null
-                              || avatarObjectField == null || gameObjectField == null
-                              || getUploadRoots == null || destroyConstraint == null
-                              || categoryTemplates.Any(category => category == null)) {
-                categoryTemplates = null;
+            if (!ArmatureReflection.ArmatureLinkAvailable || destroy == null
+                || ArmatureReflection.GetConstraintsMethod == null || constraintType == null
+                || getUploadRoots == null || destroyConstraint == null
+                || categoryTargets.Any(target => target == null)) {
+                categoryTargets = null;
                 Debug.LogWarning("[QuickFury] Armature destroy index disabled: target signature mismatch.");
                 return;
             }
 
             try {
                 harmony.Patch(
-                    apply,
+                    ArmatureReflection.ArmatureLinkApply,
                     prefix: new HarmonyMethod(typeof(ArmatureDestroyIndexPatch), nameof(Begin)),
                     finalizer: new HarmonyMethod(typeof(ArmatureDestroyIndexPatch), nameof(End))
                 );
@@ -114,18 +77,18 @@ namespace QuickFury {
             }
         }
 
-        private static Category CreateCategory(string typeName) {
+        private static CategoryTarget CreateCategoryTarget(string typeName) {
             var componentType = VrcfuryCompatibility.FindType(typeName);
             if (componentType == null || !typeof(Component).IsAssignableFrom(componentType)) return null;
 
-            var root = componentType
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "GetRootTransform"
-                                           && method.ReturnType == typeof(Transform)
-                                           && method.GetParameters().Length == 0);
+            var root = VrcfuryCompatibility.FindUniqueMethod(
+                componentType,
+                "GetRootTransform",
+                method => method.ReturnType == typeof(Transform) && method.GetParameters().Length == 0
+            );
             if (root == null) return null;
 
-            return new Category {
+            return new CategoryTarget {
                 ComponentType = componentType,
                 GetRootTransform = root
             };
@@ -136,8 +99,7 @@ namespace QuickFury {
             if (!QuickFurySettings.DestroyIndex) return;
 
             try {
-                var avatarWrapper = avatarObjectField.GetValue(__instance);
-                var avatar = ArmatureReflection.GetGameObject(avatarWrapper, gameObjectField);
+                var avatar = ArmatureReflection.GetAvatar(__instance, ArmatureReflection.ArmatureLinkAvatarField);
                 if (avatar == null) return;
                 active = new Context { Avatar = avatar };
             } catch (Exception e) {
@@ -154,15 +116,14 @@ namespace QuickFury {
             var context = active;
             if (context == null) return true;
 
-            var targetObject = ArmatureReflection.GetGameObject(__instance, gameObjectField);
+            var targetObject = ArmatureReflection.GetGameObject(__instance);
             if (targetObject == null || context.Avatar == null
                                      || !targetObject.transform.IsChildOf(context.Avatar.transform)) {
                 return true;
             }
 
-            List<GameObject> uploadRoots;
             try {
-                uploadRoots = ReadUploadRoots(__instance);
+                var uploadRoots = ReadUploadRoots(__instance);
                 if (uploadRoots == null || uploadRoots.Any(root => root == null)) return true;
 
                 if (context.UploadRoots == null) {
@@ -178,11 +139,12 @@ namespace QuickFury {
             }
 
             var target = targetObject.transform;
-            foreach (var category in context.Categories) {
-                BuildCategoryIndexIfNeeded(category);
+            // The destroyed subtree is invariant across the three component categories.
+            var subtree = target.GetComponentsInChildren<Transform>(true);
+            foreach (var categoryIndex in context.CategoryIndexes) {
                 var matches = new List<IndexedComponent>();
-                foreach (var child in target.GetComponentsInChildren<Transform>(true)) {
-                    if (category.ByComponentRoot.TryGetValue(child.GetInstanceID(), out var bucket)) {
+                foreach (var child in subtree) {
+                    if (categoryIndex.TryGetValue(child.GetInstanceID(), out var bucket)) {
                         matches.AddRange(bucket);
                     }
                 }
@@ -198,7 +160,7 @@ namespace QuickFury {
             }
 
             var constraints = VrcfuryCompatibility.InvokeUnwrapped(
-                getConstraints,
+                ArmatureReflection.GetConstraintsMethod,
                 __instance,
                 new object[] { false, true }
             ) as IEnumerable;
@@ -219,66 +181,42 @@ namespace QuickFury {
 
             var output = new List<GameObject>();
             foreach (var root in roots) {
-                output.Add(ArmatureReflection.GetGameObject(root, gameObjectField));
+                output.Add(ArmatureReflection.GetGameObject(root));
             }
             return output;
         }
 
         private static void BuildIndex(Context context, List<GameObject> uploadRoots) {
-            var categories = new List<Category>(categoryTemplates.Length);
-            foreach (var template in categoryTemplates) {
-                var category = new Category {
-                    ComponentType = template.ComponentType,
-                    GetRootTransform = template.GetRootTransform
-                };
-                foreach (var root in uploadRoots) {
-                    category.Roots.Add(new RootBucket { Root = root });
+            var indexes = new List<Dictionary<int, List<IndexedComponent>>>(categoryTargets.Length);
+            foreach (var target in categoryTargets) {
+                var byComponentRoot = new Dictionary<int, List<IndexedComponent>>();
+                var order = 0;
+                foreach (var uploadRoot in uploadRoots) {
+                    foreach (var component in uploadRoot.GetComponentsInChildren(target.ComponentType, true)) {
+                        if (component == null) continue;
+                        var root = VrcfuryCompatibility.InvokeUnwrapped(
+                            target.GetRootTransform,
+                            component,
+                            null
+                        ) as Transform;
+                        if (root == null) continue;
+                        var id = root.GetInstanceID();
+                        if (!byComponentRoot.TryGetValue(id, out var bucket)) {
+                            bucket = new List<IndexedComponent>();
+                            byComponentRoot.Add(id, bucket);
+                        }
+                        bucket.Add(new IndexedComponent {
+                            Order = order++,
+                            Component = component,
+                            UploadRoot = uploadRoot
+                        });
+                    }
                 }
-                categories.Add(category);
+                indexes.Add(byComponentRoot);
             }
 
             context.UploadRoots = new List<GameObject>(uploadRoots);
-            context.Categories = categories;
-        }
-
-        private static void BuildBucketIfNeeded(Category category, RootBucket bucket) {
-            if (bucket.Built) return;
-
-            bucket.Components.AddRange(
-                bucket.Root.GetComponentsInChildren(category.ComponentType, true)
-                    .OfType<Component>()
-                    .Where(component => component != null)
-            );
-            bucket.Built = true;
-        }
-
-        private static void BuildCategoryIndexIfNeeded(Category category) {
-            if (category.Indexed) return;
-
-            var order = 0;
-            foreach (var uploadBucket in category.Roots) {
-                BuildBucketIfNeeded(category, uploadBucket);
-                foreach (var component in uploadBucket.Components) {
-                    if (component == null) continue;
-                    var root = VrcfuryCompatibility.InvokeUnwrapped(
-                        category.GetRootTransform,
-                        component,
-                        null
-                    ) as Transform;
-                    if (root == null) continue;
-                    var id = root.GetInstanceID();
-                    if (!category.ByComponentRoot.TryGetValue(id, out var rootBucket)) {
-                        rootBucket = new List<IndexedComponent>();
-                        category.ByComponentRoot.Add(id, rootBucket);
-                    }
-                    rootBucket.Add(new IndexedComponent {
-                        Order = order++,
-                        Component = component,
-                        UploadRoot = uploadBucket.Root
-                    });
-                }
-            }
-            category.Indexed = true;
+            context.CategoryIndexes = indexes;
         }
 
         private static bool SameRoots(IReadOnlyList<GameObject> left, IReadOnlyList<GameObject> right) {

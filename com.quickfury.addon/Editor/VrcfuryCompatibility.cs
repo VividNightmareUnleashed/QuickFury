@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using UnityEditor.PackageManager;
+using Object = UnityEngine.Object;
 
 namespace QuickFury {
     internal sealed class VrcfuryCompatibility {
@@ -21,6 +22,15 @@ namespace QuickFury {
         internal MethodInfo ApplyDeferred { get; private set; }
         internal MethodInfo ApplyDeferredPathLambda { get; private set; }
         internal FieldInfo DeferredMoves { get; private set; }
+
+        internal MethodInfo SaveAssetsRun { get; private set; }
+        internal MethodInfo FactoryDidCreate { get; private set; }
+        internal FieldInfo VfLayerRootStateMachine { get; private set; }
+        internal MethodInfo VfLayerBehaviourContainersGetter { get; private set; }
+
+        internal bool DidCreate(Object asset) {
+            return (bool)InvokeUnwrapped(FactoryDidCreate, null, new object[] { asset });
+        }
 
         internal bool OptimizationCompatible => PackageVersion == OptimizedVersion
                                                 && ApplyDeferred != null
@@ -78,7 +88,7 @@ namespace QuickFury {
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                     method => method.ReturnType == typeof(void) && method.GetParameters().Length == 0
                 );
-                output.ApplyDeferredPathLambda = objectMoveServiceType?
+                var lambdaCandidates = objectMoveServiceType?
                     .GetMethods(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
                     .Where(method => method.Name.Contains("ApplyDeferred"))
                     .Where(method => method.ReturnType == typeof(string))
@@ -86,9 +96,27 @@ namespace QuickFury {
                         var parameters = method.GetParameters();
                         return parameters.Length == 1 && parameters[0].ParameterType == typeof(string);
                     })
-                    .SingleOrDefault();
+                    .Take(2).ToList();
+                output.ApplyDeferredPathLambda = lambdaCandidates?.Count == 1 ? lambdaCandidates[0] : null;
                 output.DeferredMoves = objectMoveServiceType?
                     .GetField("deferred", BindingFlags.Instance | BindingFlags.NonPublic);
+
+                var saveAssetsType = output.AvatarEditorAssembly.GetType("VF.Service.SaveAssetsService", false);
+                output.SaveAssetsRun = FindNoArgVoid(saveAssetsType, "Run");
+
+                var factoryType = FindType("VF.Utils.VrcfObjectFactory");
+                output.FactoryDidCreate = FindUniqueMethod(
+                    factoryType,
+                    "DidCreate",
+                    method => method.ReturnType == typeof(bool) && method.GetParameters().Length == 1
+                );
+
+                var vfLayerType = FindType("VF.Utils.Controller.VFLayer");
+                output.VfLayerRootStateMachine = vfLayerType?
+                    .GetField("rootStateMachine", BindingFlags.Instance | BindingFlags.NonPublic);
+                output.VfLayerBehaviourContainersGetter = vfLayerType?
+                    .GetProperty("allBehaviourContainers", BindingFlags.Instance | BindingFlags.NonPublic)?
+                    .GetGetMethod(true);
 
                 if (output.RunMain == null || output.ActionCall == null
                                            || output.ActionGetName == null || output.ActionGetService == null) {
@@ -104,12 +132,19 @@ namespace QuickFury {
             }
         }
 
+        private static readonly Dictionary<string, Type> TypeCache =
+            new Dictionary<string, Type>(StringComparer.Ordinal);
+
         internal static Type FindType(string fullName) {
+            if (TypeCache.TryGetValue(fullName, out var cached)) return cached;
+
+            Type found = null;
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies()) {
-                var type = assembly.GetType(fullName, false);
-                if (type != null) return type;
+                found = assembly.GetType(fullName, false);
+                if (found != null) break;
             }
-            return null;
+            TypeCache[fullName] = found;
+            return found;
         }
 
         internal static IEnumerable<MethodInfo> FindDeclaredMethods(string typeName, string methodName) {
@@ -137,6 +172,36 @@ namespace QuickFury {
             );
         }
 
+        internal static MethodInfo FindNoArgVoid(Type type, string name) {
+            return FindUniqueMethod(
+                type,
+                name,
+                method => method.ReturnType == typeof(void) && method.GetParameters().Length == 0
+            );
+        }
+
+        internal static object CreateEmptyImmutableSet(Type setType) {
+            try {
+                var arguments = setType.GetGenericArguments();
+                if (arguments.Length != 1) return null;
+                // Unity also loads a private copy inside ReportGeneratorMerged. Resolve
+                // from the set type's own assembly so the empty set is assignable to
+                // VRCFury's System.Collections.Immutable contract.
+                var openType = setType.Assembly.GetType(
+                    "System.Collections.Immutable.ImmutableHashSet`1",
+                    false
+                );
+                if (openType == null) return null;
+                var closedType = openType.MakeGenericType(arguments[0]);
+                var empty = closedType
+                    .GetField("Empty", BindingFlags.Static | BindingFlags.Public)?
+                    .GetValue(null);
+                return empty != null && setType.IsInstanceOfType(empty) ? empty : null;
+            } catch {
+                return null;
+            }
+        }
+
         internal static object InvokeUnwrapped(MethodInfo method, object instance, object[] args) {
             try {
                 return method.Invoke(instance, args);
@@ -153,7 +218,15 @@ namespace QuickFury {
             Func<MethodInfo, bool> predicate
         ) {
             if (type == null) return null;
-            return type.GetMethods(flags).Where(method => method.Name == name).Where(predicate).SingleOrDefault();
+            // Ambiguity means the pinned signature no longer identifies one method; treat
+            // it as missing so the caller disables its patch instead of throwing.
+            MethodInfo match = null;
+            foreach (var method in type.GetMethods(flags)) {
+                if (method.Name != name || !predicate(method)) continue;
+                if (match != null) return null;
+                match = method;
+            }
+            return match;
         }
     }
 }

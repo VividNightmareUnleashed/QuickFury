@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.1 — 2026-07-11
+
+Simplify the 1.2 Editor implementation without changing its public behavior or compatibility
+boundary.
+
+- Centralize reflection method selection and inner-exception propagation shared by optimizers.
+- Consolidate optimization defaults, menu paths, toggle handlers, and validation callbacks.
+- Remove redundant lifecycle state from scoped Armature Link, behaviour, and asset patches.
+- Avoid repeated profiling preference reads, controller-graph iterator allocations, clip-settings
+  reflection, and blendshape cache-key allocations in measured hot paths.
+- Install detailed-profiling method patches only while the profiling toggle is enabled, and
+  isolate per-patch installation so one failed target cannot disable the remaining patches.
+- Refresh SPS material dependency hashes at the start of each bake and narrow the Armature Link
+  debug-component suppression to the single upload-state read that controls it.
+- Use object-typed Harmony patch methods for the layer behaviour-container getter: Harmony's
+  token-based shared state cannot represent closed generic patch methods, which corrupted the
+  getter's patch list on any second patch or on unpatching during assembly reload.
+- Preserve the existing fail-closed, per-optimizer target checks and rollback controls.
+
 ## 1.2.0 — 2026-07-10
 
 Extend the 1.1 rewrite into the remaining measured VRCFury bake hot paths.

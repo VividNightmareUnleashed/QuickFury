@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
-using System.Security.Cryptography;
 using System.Text;
 using HarmonyLib;
 using UnityEditor;
@@ -21,7 +20,7 @@ namespace QuickFury {
     /// serialized property on every node.
     /// </summary>
     internal static class FastControllerAssetGraphPatch {
-        private static MethodInfo didCreate;
+        private static VrcfuryCompatibility compatibility;
         private static MethodInfo getUseOriginalClip;
         private static MethodInfo getClipExt;
         private static MethodInfo finalizeClip;
@@ -31,48 +30,44 @@ namespace QuickFury {
         private static PropertyInfo curveIsFloat;
         private static PropertyInfo curveFloatCurve;
         private static PropertyInfo curveObjectCurve;
-        private static Type clipSettingsType;
         private static PropertyInfo[] clipSettingsProperties;
         [ThreadStatic] private static HashSet<Object> savedOrScheduled;
         [ThreadStatic] private static long lastStatsTicks;
         internal static string LastStats { get; private set; } = "none";
 
-        internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
+        internal static void Install(Harmony harmony, VrcfuryCompatibility targets) {
+            compatibility = targets;
+
             var sessionType = VrcfuryCompatibility.FindType("VF.Utils.SaveAssetsSession");
-            var getUnsavedChildren = sessionType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => {
-                    if (method.Name != "GetUnsavedChildren") return false;
+            var getUnsavedChildren = VrcfuryCompatibility.FindUniqueMethod(
+                sessionType,
+                "GetUnsavedChildren",
+                method => {
                     var parameters = method.GetParameters();
                     return parameters.Length == 3
                            && parameters[0].ParameterType == typeof(Object)
                            && parameters[1].ParameterType == typeof(bool)
                            && parameters[2].ParameterType == typeof(bool);
-                });
-
-            var factoryType = VrcfuryCompatibility.FindType("VF.Utils.VrcfObjectFactory");
-            didCreate = factoryType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "DidCreate"
-                                           && method.ReturnType == typeof(bool)
-                                           && method.GetParameters().Length == 1);
+                }
+            );
 
             var clipExtensions = VrcfuryCompatibility.FindType("VF.Utils.AnimationClipExtensions");
-            getUseOriginalClip = clipExtensions?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "GetUseOriginalUserClip"
-                                           && method.ReturnType == typeof(AnimationClip)
-                                           && method.GetParameters().Length == 1);
-            getClipExt = clipExtensions?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "GetExt"
-                                           && method.GetParameters().Length == 1
-                                           && method.GetParameters()[0].ParameterType == typeof(AnimationClip));
-            finalizeClip = clipExtensions?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "FinalizeAsset"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 2);
+            getUseOriginalClip = VrcfuryCompatibility.FindUniqueMethod(
+                clipExtensions,
+                "GetUseOriginalUserClip",
+                method => method.ReturnType == typeof(AnimationClip) && method.GetParameters().Length == 1
+            );
+            getClipExt = VrcfuryCompatibility.FindUniqueMethod(
+                clipExtensions,
+                "GetExt",
+                method => method.GetParameters().Length == 1
+                          && method.GetParameters()[0].ParameterType == typeof(AnimationClip)
+            );
+            finalizeClip = VrcfuryCompatibility.FindUniqueMethod(
+                clipExtensions,
+                "FinalizeAsset",
+                method => method.ReturnType == typeof(void) && method.GetParameters().Length == 2
+            );
 
             var clipExtType = getClipExt?.ReturnType;
             extCurves = clipExtType?.GetField(
@@ -98,18 +93,13 @@ namespace QuickFury {
             );
 
             var mutableManager = VrcfuryCompatibility.FindType("VF.Utils.MutableManager");
-            rewriteInternals = mutableManager?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "RewriteInternals"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 2);
+            rewriteInternals = VrcfuryCompatibility.FindUniqueMethod(
+                mutableManager,
+                "RewriteInternals",
+                method => method.ReturnType == typeof(void) && method.GetParameters().Length == 2
+            );
 
-            var saveAssetsType = compatibility.AvatarEditorAssembly.GetType("VF.Service.SaveAssetsService", false);
-            var saveAssetsRun = saveAssetsType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Run"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 0);
+            var saveAssetsRun = targets.SaveAssetsRun;
             var assetDatabaseType = VrcfuryCompatibility.FindType("VF.Utils.VRCFuryAssetDatabase");
             var saveMethods = assetDatabaseType?
                 .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
@@ -118,7 +108,7 @@ namespace QuickFury {
                                  && method.GetParameters()[0].ParameterType == typeof(Object))
                 .ToArray() ?? Array.Empty<MethodInfo>();
 
-            if (getUnsavedChildren == null || didCreate == null || getUseOriginalClip == null
+            if (getUnsavedChildren == null || targets.FactoryDidCreate == null || getUseOriginalClip == null
                                            || getClipExt == null || finalizeClip == null
                                            || extCurves == null || extOriginalSourceClip == null
                                            || curveIsFloat == null || curveFloatCurve == null
@@ -204,6 +194,12 @@ namespace QuickFury {
         }
 
         private static IList<Object> Collect(AnimatorController controller, bool reuseOriginalClips) {
+            // Snapshot per controller: EditorPrefs reads are native registry hits, and the
+            // tick capture below is pure overhead unless detailed profiling is enabled.
+            var deduplicateClips = QuickFurySettings.DeduplicateGeneratedClips;
+            var detailed = QuickFurySettings.DetailedProfiling;
+            long Timestamp() => detailed ? Stopwatch.GetTimestamp() : 0L;
+
             long includeTicks = 0;
             long pushTicks = 0;
             long dependencyTicks = 0;
@@ -238,9 +234,9 @@ namespace QuickFury {
 
             bool Include(Object current) {
                 if (current == controller) return true;
-                var timed = Stopwatch.GetTimestamp();
+                var timed = Timestamp();
                 var created = DidCreate(current);
-                didCreateTicks += Stopwatch.GetTimestamp() - timed;
+                didCreateTicks += Timestamp() - timed;
                 if (!created) return false;
 
                 var known = savedOrScheduled;
@@ -259,22 +255,22 @@ namespace QuickFury {
                 if (current is AnimationClip clip) {
                     clipCount++;
                     if (reuseOriginalClips) {
-                        timed = Stopwatch.GetTimestamp();
+                        timed = Timestamp();
                         var original = VrcfuryCompatibility.InvokeUnwrapped(
                             getUseOriginalClip,
                             null,
                             new object[] { clip }
                         ) as AnimationClip;
-                        originalClipTicks += Stopwatch.GetTimestamp() - timed;
+                        originalClipTicks += Timestamp() - timed;
                         if (original != null) {
                             clipReplacements[clip] = original;
                             return false;
                         }
                     }
-                    if (QuickFurySettings.DeduplicateGeneratedClips) {
-                        timed = Stopwatch.GetTimestamp();
+                    if (deduplicateClips) {
+                        timed = Timestamp();
                         var contentKey = GetGeneratedClipContentKey(clip);
-                        deduplicateClipTicks += Stopwatch.GetTimestamp() - timed;
+                        deduplicateClipTicks += Timestamp() - timed;
                         if (contentKey != null) {
                             if (generatedClipByContent.TryGetValue(contentKey, out var canonical)) {
                                 clipReplacements[clip] = canonical;
@@ -284,9 +280,9 @@ namespace QuickFury {
                             generatedClipByContent.Add(contentKey, clip);
                         }
                     }
-                    timed = Stopwatch.GetTimestamp();
+                    timed = Timestamp();
                     VrcfuryCompatibility.InvokeUnwrapped(finalizeClip, null, new object[] { clip, true });
-                    finalizeClipTicks += Stopwatch.GetTimestamp() - timed;
+                    finalizeClipTicks += Timestamp() - timed;
                 }
                 known?.Add(current);
                 output.Add(current);
@@ -296,20 +292,20 @@ namespace QuickFury {
             while (stack.Count > 0) {
                 var current = stack.Pop();
                 if (current == null || !visited.Add(current)) continue;
-                var started = Stopwatch.GetTimestamp();
+                var started = Timestamp();
                 var shouldTraverse = Include(current);
-                includeTicks += Stopwatch.GetTimestamp() - started;
+                includeTicks += Timestamp() - started;
                 if (!shouldTraverse) continue;
-                started = Stopwatch.GetTimestamp();
+                started = Timestamp();
                 PushChildren(current, stack, nativeDependencyRoots, clipDependencies);
-                pushTicks += Stopwatch.GetTimestamp() - started;
+                pushTicks += Timestamp() - started;
             }
 
             // CollectDependencies is recursive. One batched native traversal handles the
             // arbitrary serialized fields on all StateMachineBehaviours. AnimationClip
             // dependencies are enumerated precisely through AnimationUtility above.
             if (nativeDependencyRoots.Count > 0) {
-                var started = Stopwatch.GetTimestamp();
+                var started = Timestamp();
                 foreach (var dependency in EditorUtility.CollectDependencies(
                              nativeDependencyRoots.Distinct().ToArray()
                          )) {
@@ -317,11 +313,11 @@ namespace QuickFury {
                     if (dependency == null || !visited.Add(dependency)) continue;
                     Include(dependency);
                 }
-                dependencyTicks += Stopwatch.GetTimestamp() - started;
+                dependencyTicks += Timestamp() - started;
             }
 
             if (clipReplacements.Count > 0) {
-                var started = Stopwatch.GetTimestamp();
+                var started = Timestamp();
                 RewriteMotions(output, clipReplacements);
                 RewriteClipReferences(
                     output.OfType<AnimationClip>().Where(clip =>
@@ -343,20 +339,20 @@ namespace QuickFury {
                         );
                     }
                 }
-                rewriteTicks += Stopwatch.GetTimestamp() - started;
+                rewriteTicks += Timestamp() - started;
             }
 
-            var settingsStarted = Stopwatch.GetTimestamp();
+            var settingsStarted = Timestamp();
             foreach (var clip in output.OfType<AnimationClip>()) {
                 AnimationUtility.SetAnimationClipSettings(
                     clip,
                     AnimationUtility.GetAnimationClipSettings(clip)
                 );
             }
-            settingsTicks += Stopwatch.GetTimestamp() - settingsStarted;
+            settingsTicks += Timestamp() - settingsStarted;
 
             var measuredTicks = includeTicks + pushTicks + dependencyTicks + rewriteTicks + settingsTicks;
-            if (measuredTicks > lastStatsTicks) {
+            if (detailed && measuredTicks > lastStatsTicks) {
                 lastStatsTicks = measuredTicks;
                 LastStats = $"visited={visited.Count},output={output.Count},nativeRoots={nativeDependencyRoots.Count}," +
                             $"includeMs={ToMilliseconds(includeTicks):F1},pushMs={ToMilliseconds(pushTicks):F1}," +
@@ -452,23 +448,20 @@ namespace QuickFury {
                 }
             }
 
-            using (var hash = SHA256.Create()) {
-                return string.Concat(
-                    hash.ComputeHash(Encoding.UTF8.GetBytes(builder.ToString()))
-                        .Select(value => value.ToString("X2"))
-                );
-            }
+            // The key only dedupes within one Collect call, so a fast non-cryptographic
+            // hash is sufficient — no per-clip SHA256 instance and hex-string churn.
+            return Hash128.Compute(builder.ToString()).ToString();
         }
 
         private static PropertyInfo[] GetClipSettingsProperties(Type type) {
-            if (type == clipSettingsType) return clipSettingsProperties;
-
-            clipSettingsProperties = type
-                .GetProperties(BindingFlags.Instance | BindingFlags.Public)
-                .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
-                .OrderBy(property => property.Name, StringComparer.Ordinal)
-                .ToArray();
-            clipSettingsType = type;
+            // AnimationUtility.GetAnimationClipSettings always returns the same type.
+            if (clipSettingsProperties == null) {
+                clipSettingsProperties = type
+                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+                    .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
+                    .OrderBy(property => property.Name, StringComparer.Ordinal)
+                    .ToArray();
+            }
             return clipSettingsProperties;
         }
 
@@ -503,7 +496,7 @@ namespace QuickFury {
         }
 
         private static double ToMilliseconds(long ticks) {
-            return ticks * 1000.0 / Stopwatch.Frequency;
+            return ProfilePatches.ToMilliseconds(ticks);
         }
 
         private static void PushChildren(
@@ -670,7 +663,7 @@ namespace QuickFury {
         }
 
         private static bool DidCreate(Object obj) {
-            return (bool)VrcfuryCompatibility.InvokeUnwrapped(didCreate, null, new object[] { obj });
+            return compatibility.DidCreate(obj);
         }
     }
 }

@@ -30,22 +30,16 @@ namespace QuickFury {
         private static Type parameterDriverType;
         private static Type animatorLayerControlType;
 
-        internal static object EmptyContainerSet => emptyContainers;
-
         internal static string LastStats { get; private set; } = "none";
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
-            var layerType = VrcfuryCompatibility.FindType("VF.Utils.Controller.VFLayer");
-            var containerGetter = layerType?
-                .GetProperty("allBehaviourContainers", BindingFlags.Instance | BindingFlags.NonPublic)?
-                .GetGetMethod(true);
-            stateMachineField = layerType?.GetField(
-                "rootStateMachine",
-                BindingFlags.Instance | BindingFlags.NonPublic
-            );
+            var containerGetter = compatibility.VfLayerBehaviourContainersGetter;
+            stateMachineField = compatibility.VfLayerRootStateMachine;
+            emptyContainers = containerGetter == null
+                ? null
+                : VrcfuryCompatibility.CreateEmptyImmutableSet(containerGetter.ReturnType);
 
-            if (containerGetter == null || stateMachineField == null
-                                        || !TryCreateEmptySet(containerGetter.ReturnType)) {
+            if (containerGetter == null || stateMachineField == null || emptyContainers == null) {
                 Debug.LogWarning("[QuickFury] Behaviour container filter disabled: target signature mismatch.");
                 return;
             }
@@ -60,9 +54,18 @@ namespace QuickFury {
                 "VRC.SDK3.Avatars.Components.VRCAnimatorLayerControl"
             );
 
-            var actionApply = FindNoArgVoid("VF.Service.ActionConflictResolverService", "Apply");
-            var syncedDriverApply = FindNoArgVoid("VF.Service.MakeAllSyncedDriversLocalService", "Apply");
-            var layerControlFix = FindNoArgVoid("VF.Service.AnimatorLayerControlOffsetService", "Fix");
+            var actionApply = VrcfuryCompatibility.FindNoArgVoid(
+                VrcfuryCompatibility.FindType("VF.Service.ActionConflictResolverService"),
+                "Apply"
+            );
+            var syncedDriverApply = VrcfuryCompatibility.FindNoArgVoid(
+                VrcfuryCompatibility.FindType("VF.Service.MakeAllSyncedDriversLocalService"),
+                "Apply"
+            );
+            var layerControlFix = VrcfuryCompatibility.FindNoArgVoid(
+                VrcfuryCompatibility.FindType("VF.Service.AnimatorLayerControlOffsetService"),
+                "Fix"
+            );
 
             if (playableLayerControlType == null || parameterDriverType == null || animatorLayerControlType == null
                                               || actionApply == null || syncedDriverApply == null
@@ -72,6 +75,17 @@ namespace QuickFury {
             }
 
             try {
+                // The filter owns its own prefix on the getter so it works even when the
+                // tracking behaviour index (which patches the same getter) is unavailable.
+                // At most one of the two contexts is ever active: they cover different
+                // build phases. The prefix uses an object-typed __result — a closed
+                // generic patch method would not survive Harmony's token-based shared
+                // state when the getter's patch list is re-read.
+                harmony.Patch(
+                    containerGetter,
+                    prefix: new HarmonyMethod(typeof(BehaviourContainerFilterPatch), nameof(Filter))
+                );
+
                 PatchPhase(
                     harmony,
                     actionApply,
@@ -91,14 +105,6 @@ namespace QuickFury {
                 active = null;
                 Debug.LogWarning("[QuickFury] Behaviour container filter disabled: " + e.Message);
             }
-        }
-
-        private static MethodInfo FindNoArgVoid(string typeName, string methodName) {
-            return VrcfuryCompatibility.FindType(typeName)?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == methodName
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 0);
         }
 
         private static void PatchPhase(
@@ -140,7 +146,7 @@ namespace QuickFury {
             return __exception;
         }
 
-        internal static bool Filter<T>(object __instance, ref T __result) {
+        private static bool Filter(object __instance, ref object __result) {
             var context = active;
             if (context == null || __instance == null) return true;
 
@@ -161,7 +167,7 @@ namespace QuickFury {
                 if (hasTarget) return true;
 
                 context.LayersSkipped++;
-                __result = (T)emptyContainers;
+                __result = emptyContainers;
                 return false;
             } catch (Exception e) {
                 active = null;
@@ -195,29 +201,6 @@ namespace QuickFury {
                 if (HasTarget(childStateMachine.stateMachine, target, visited)) return true;
             }
             return false;
-        }
-
-        private static bool TryCreateEmptySet(Type returnType) {
-            try {
-                var arguments = returnType.GetGenericArguments();
-                if (arguments.Length != 1) return false;
-                // Unity also loads a private copy inside ReportGeneratorMerged.
-                // Resolve from the interface's own assembly so the empty set is
-                // assignable to VRCFury's System.Collections.Immutable contract.
-                var openType = returnType.Assembly.GetType(
-                    "System.Collections.Immutable.ImmutableHashSet`1",
-                    false
-                );
-                if (openType == null) return false;
-                var closedType = openType.MakeGenericType(arguments[0]);
-                emptyContainers = closedType
-                    .GetField("Empty", BindingFlags.Static | BindingFlags.Public)?
-                    .GetValue(null);
-                return emptyContainers != null && returnType.IsInstanceOfType(emptyContainers);
-            } catch {
-                emptyContainers = null;
-                return false;
-            }
         }
     }
 }

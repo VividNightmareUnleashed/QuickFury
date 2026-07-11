@@ -1,3 +1,6 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -70,66 +73,82 @@ namespace QuickFury {
             OptimizationsMenu + "Skip empty deferred rewrite";
         private const string DetailedProfilingMenu = ProfilingMenu + "Detailed internal timings";
 
-        private static readonly (string Key, bool Recommended)[] OptimizationDefaults = {
-            (OptimizeOrderedPathsKey, true),
-            (SkipEmptyDeferredRewriteKey, true),
-            (ConstraintIndexKey, true),
-            (PhysboneIndexKey, true),
-            (SkinIndexKey, true),
-            (DestroyIndexKey, true),
-            (SkipArmatureDebugInfoKey, true),
-            (FastArmatureMoveKey, true),
-            (LayerToTreeLayerIndexKey, true),
-            (TrackingBehaviourIndexKey, true),
-            (BehaviourContainerFilterKey, true),
-            (DeduplicateGeneratedClipsKey, true),
-            (SkipTransformAssetScanKey, false),
-            (SkipDuplicateRendererAssetScanKey, false),
-            (RetainSaveAssetsBatchingKey, true),
-            (FastSaveAssetDiscoveryKey, true),
-            (FastControllerAssetGraphKey, true),
-            (ConsolidatedAssetContainerKey, true),
-            (BlendshapeBindingCacheKey, true),
-            (SpsCoveredRendererKey, true),
-            (SpsMaterialProbeCacheKey, true),
-            (ControllerParameterIndexKey, true)
+        // Single source for every optimization key: its recommended value (also the
+        // getter default) and the label used in the profiler report.
+        private static readonly (string Key, string ReportName, bool Recommended)[] OptimizationDefaults = {
+            (OptimizeOrderedPathsKey, "orderedPaths", true),
+            (SkipEmptyDeferredRewriteKey, "skipEmptyDeferred", true),
+            (ConstraintIndexKey, "constraintIndex", true),
+            (PhysboneIndexKey, "physboneIndex", true),
+            (SkinIndexKey, "skinIndex", true),
+            (DestroyIndexKey, "destroyIndex", true),
+            (SkipArmatureDebugInfoKey, "skipArmatureDebugInfo", true),
+            (FastArmatureMoveKey, "fastArmatureMove", true),
+            (LayerToTreeLayerIndexKey, "layerIndex", true),
+            (TrackingBehaviourIndexKey, "trackingBehaviourIndex", true),
+            (BehaviourContainerFilterKey, "behaviourContainerFilter", true),
+            (DeduplicateGeneratedClipsKey, "deduplicateGeneratedClips", true),
+            (SkipTransformAssetScanKey, "skipTransformAssetScan", false),
+            (SkipDuplicateRendererAssetScanKey, "skipDuplicateRendererAssetScan", false),
+            (RetainSaveAssetsBatchingKey, "retainSaveAssetsBatching", true),
+            (FastSaveAssetDiscoveryKey, "fastSaveAssetDiscovery", true),
+            (FastControllerAssetGraphKey, "fastControllerAssetGraph", true),
+            (ConsolidatedAssetContainerKey, "consolidatedAssetContainer", true),
+            (BlendshapeBindingCacheKey, "blendshapeBindingCache", true),
+            (SpsCoveredRendererKey, "spsCoveredRenderer", true),
+            (SpsMaterialProbeCacheKey, "spsMaterialProbeCache", true),
+            (ControllerParameterIndexKey, "controllerParameterIndex", true)
         };
 
-        internal static bool OptimizeOrderedPaths => EditorPrefs.GetBool(OptimizeOrderedPathsKey, true);
-        internal static bool SkipEmptyDeferredRewrite => EditorPrefs.GetBool(SkipEmptyDeferredRewriteKey, true);
-        internal static bool ConstraintIndex => EditorPrefs.GetBool(ConstraintIndexKey, true);
-        internal static bool PhysboneIndex => EditorPrefs.GetBool(PhysboneIndexKey, true);
-        internal static bool SkinIndex => EditorPrefs.GetBool(SkinIndexKey, true);
-        internal static bool DestroyIndex => EditorPrefs.GetBool(DestroyIndexKey, true);
-        internal static bool SkipArmatureDebugInfo => EditorPrefs.GetBool(SkipArmatureDebugInfoKey, true);
-        internal static bool FastArmatureMove => EditorPrefs.GetBool(FastArmatureMoveKey, true);
-        internal static bool SkipTransformAssetScan => EditorPrefs.GetBool(SkipTransformAssetScanKey, false);
-        internal static bool SkipDuplicateRendererAssetScan =>
-            EditorPrefs.GetBool(SkipDuplicateRendererAssetScanKey, false);
-        internal static bool RetainSaveAssetsBatching => EditorPrefs.GetBool(RetainSaveAssetsBatchingKey, true);
-        internal static bool FastSaveAssetDiscovery => EditorPrefs.GetBool(FastSaveAssetDiscoveryKey, true);
-        internal static bool FastControllerAssetGraph => EditorPrefs.GetBool(FastControllerAssetGraphKey, true);
-        internal static bool ConsolidatedAssetContainer => EditorPrefs.GetBool(ConsolidatedAssetContainerKey, true);
-        internal static bool BlendshapeBindingCache => EditorPrefs.GetBool(BlendshapeBindingCacheKey, true);
-        internal static bool SpsCoveredRenderer => EditorPrefs.GetBool(SpsCoveredRendererKey, true);
-        internal static bool SpsMaterialProbeCache => EditorPrefs.GetBool(SpsMaterialProbeCacheKey, true);
-        internal static bool ControllerParameterIndex => EditorPrefs.GetBool(ControllerParameterIndexKey, true);
-        internal static bool LayerToTreeLayerIndex => EditorPrefs.GetBool(LayerToTreeLayerIndexKey, true);
-        internal static bool TrackingBehaviourIndex => EditorPrefs.GetBool(TrackingBehaviourIndexKey, true);
-        internal static bool BehaviourContainerFilter => EditorPrefs.GetBool(BehaviourContainerFilterKey, true);
-        internal static bool DeduplicateGeneratedClips => EditorPrefs.GetBool(DeduplicateGeneratedClipsKey, true);
+        private static readonly Dictionary<string, bool> RecommendedByKey =
+            OptimizationDefaults.ToDictionary(entry => entry.Key, entry => entry.Recommended);
+
+        private static bool Get(string key) => EditorPrefs.GetBool(key, RecommendedByKey[key]);
+
+        internal static bool OptimizeOrderedPaths => Get(OptimizeOrderedPathsKey);
+        internal static bool SkipEmptyDeferredRewrite => Get(SkipEmptyDeferredRewriteKey);
+        internal static bool ConstraintIndex => Get(ConstraintIndexKey);
+        internal static bool PhysboneIndex => Get(PhysboneIndexKey);
+        internal static bool SkinIndex => Get(SkinIndexKey);
+        internal static bool DestroyIndex => Get(DestroyIndexKey);
+        internal static bool SkipArmatureDebugInfo => Get(SkipArmatureDebugInfoKey);
+        internal static bool FastArmatureMove => Get(FastArmatureMoveKey);
+        internal static bool SkipTransformAssetScan => Get(SkipTransformAssetScanKey);
+        internal static bool SkipDuplicateRendererAssetScan => Get(SkipDuplicateRendererAssetScanKey);
+        internal static bool RetainSaveAssetsBatching => Get(RetainSaveAssetsBatchingKey);
+        internal static bool FastSaveAssetDiscovery => Get(FastSaveAssetDiscoveryKey);
+        internal static bool FastControllerAssetGraph => Get(FastControllerAssetGraphKey);
+        internal static bool ConsolidatedAssetContainer => Get(ConsolidatedAssetContainerKey);
+        internal static bool BlendshapeBindingCache => Get(BlendshapeBindingCacheKey);
+        internal static bool SpsCoveredRenderer => Get(SpsCoveredRendererKey);
+        internal static bool SpsMaterialProbeCache => Get(SpsMaterialProbeCacheKey);
+        internal static bool ControllerParameterIndex => Get(ControllerParameterIndexKey);
+        internal static bool LayerToTreeLayerIndex => Get(LayerToTreeLayerIndexKey);
+        internal static bool TrackingBehaviourIndex => Get(TrackingBehaviourIndexKey);
+        internal static bool BehaviourContainerFilter => Get(BehaviourContainerFilterKey);
+        internal static bool DeduplicateGeneratedClips => Get(DeduplicateGeneratedClipsKey);
         internal static bool DetailedProfiling => EditorPrefs.GetBool(DetailedProfilingKey, false);
+
+        internal static bool IsUnity2022 =>
+            Application.unityVersion.StartsWith("2022.", StringComparison.Ordinal);
+
+        internal static string DescribeOptimizationFlags() {
+            return string.Join(
+                ", ",
+                OptimizationDefaults.Select(entry => entry.ReportName + "=" + Get(entry.Key))
+            );
+        }
 
         [MenuItem("Tools/QuickFury/Use recommended settings", false, 1)]
         private static void UseRecommendedSettings() {
-            foreach (var (key, recommended) in OptimizationDefaults) {
+            foreach (var (key, _, recommended) in OptimizationDefaults) {
                 EditorPrefs.SetBool(key, recommended);
             }
         }
 
         [MenuItem("Tools/QuickFury/Disable all optimizations", false, 2)]
         private static void DisableAllOptimizations() {
-            foreach (var (key, _) in OptimizationDefaults) {
+            foreach (var (key, _, _) in OptimizationDefaults) {
                 EditorPrefs.SetBool(key, false);
             }
         }
@@ -198,7 +217,7 @@ namespace QuickFury {
             return Validate(
                 RetainSaveAssetsBatchingMenu,
                 RetainSaveAssetsBatching,
-                QuickFuryBootstrap.OptimizationCompatible && Application.unityVersion.StartsWith("2022.")
+                QuickFuryBootstrap.OptimizationCompatible && IsUnity2022
             );
         }
 
@@ -286,8 +305,15 @@ namespace QuickFury {
             Toggle(DeduplicateGeneratedClipsKey, DeduplicateGeneratedClips);
 
         [MenuItem(DeduplicateGeneratedClipsMenu, true)]
-        private static bool ValidateDeduplicateGeneratedClips() =>
-            ValidateOptimization(DeduplicateGeneratedClipsMenu, DeduplicateGeneratedClips);
+        private static bool ValidateDeduplicateGeneratedClips() {
+            // Clip deduplication runs inside the fast controller asset graph traversal
+            // and does nothing while that parent optimization is off.
+            return Validate(
+                DeduplicateGeneratedClipsMenu,
+                DeduplicateGeneratedClips,
+                QuickFuryBootstrap.OptimizationCompatible && FastControllerAssetGraph
+            );
+        }
 
         [MenuItem(OrderedPathsMenu)]
         private static void ToggleOrderedPaths() => Toggle(OptimizeOrderedPathsKey, OptimizeOrderedPaths);
@@ -305,7 +331,12 @@ namespace QuickFury {
             ValidateOptimization(EmptyDeferredRewriteMenu, SkipEmptyDeferredRewrite);
 
         [MenuItem(DetailedProfilingMenu)]
-        private static void ToggleDetailedProfiling() => Toggle(DetailedProfilingKey, DetailedProfiling);
+        private static void ToggleDetailedProfiling() {
+            Toggle(DetailedProfilingKey, DetailedProfiling);
+            // The per-method timing patches are only installed while this is enabled, so
+            // hot VRCFury methods carry no Harmony overhead when profiling is off.
+            if (DetailedProfiling) ProfilePatches.EnsureDetailedTargetsInstalled();
+        }
 
         [MenuItem(DetailedProfilingMenu, true)]
         private static bool ValidateDetailedProfiling() =>

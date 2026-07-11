@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -26,55 +25,49 @@ namespace QuickFury {
 
         [ThreadStatic] private static Context active;
 
-        private static FieldInfo avatarObjectField;
-        private static FieldInfo gameObjectField;
         private static MethodInfo getMutableMesh;
         private static MethodInfo dirty;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
             var armatureType = VrcfuryCompatibility.FindType("VF.Service.ArmatureLinkService");
-            var vfGameObjectType = VrcfuryCompatibility.FindType("VF.Utils.VFGameObject");
             var rendererExtensions = VrcfuryCompatibility.FindType("VF.Utils.RendererExtensions");
             var dirtyUtils = VrcfuryCompatibility.FindType("VF.Utils.DirtyUtils");
 
-            var apply = armatureType?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Apply" && method.GetParameters().Length == 0);
-            var rewriteSkins = armatureType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => {
-                    if (method.Name != "RewriteSkins" || method.ReturnType != typeof(void)) return false;
-                    return method.GetParameters().Length == 3;
-                });
-
-            avatarObjectField = armatureType?.GetField("avatarObject", BindingFlags.Instance | BindingFlags.NonPublic);
-            gameObjectField = vfGameObjectType?.GetField("_gameObject", BindingFlags.Instance | BindingFlags.NonPublic);
-            getMutableMesh = rendererExtensions?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => {
-                    if (method.Name != "GetMutableMesh" || method.ReturnType != typeof(Mesh)) return false;
+            var rewriteSkins = VrcfuryCompatibility.FindUniqueMethod(
+                armatureType,
+                "RewriteSkins",
+                method => method.ReturnType == typeof(void) && method.GetParameters().Length == 3
+            );
+            getMutableMesh = VrcfuryCompatibility.FindUniqueMethod(
+                rendererExtensions,
+                "GetMutableMesh",
+                method => {
+                    if (method.ReturnType != typeof(Mesh)) return false;
                     var parameters = method.GetParameters();
                     return parameters.Length == 2
                            && parameters[0].ParameterType == typeof(Renderer)
                            && parameters[1].ParameterType == typeof(string);
-                });
-            dirty = dirtyUtils?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => {
-                    if (method.Name != "Dirty" || method.ReturnType != typeof(void)) return false;
+                }
+            );
+            dirty = VrcfuryCompatibility.FindUniqueMethod(
+                dirtyUtils,
+                "Dirty",
+                method => {
+                    if (method.ReturnType != typeof(void)) return false;
                     var parameters = method.GetParameters();
                     return parameters.Length == 1 && parameters[0].ParameterType == typeof(UnityEngine.Object);
-                });
+                }
+            );
 
-            if (apply == null || rewriteSkins == null || compatibility.ApplyDeferred == null
-                              || avatarObjectField == null || gameObjectField == null
-                              || getMutableMesh == null || dirty == null) {
+            if (!ArmatureReflection.ArmatureLinkAvailable || rewriteSkins == null
+                || compatibility.ApplyDeferred == null || getMutableMesh == null || dirty == null) {
                 Debug.LogWarning("[QuickFury] Batched Armature skin rewrite disabled: target signature mismatch.");
                 return;
             }
 
             try {
                 harmony.Patch(
-                    apply,
+                    ArmatureReflection.ArmatureLinkApply,
                     prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(Begin)),
                     finalizer: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(End))
                 );
@@ -96,8 +89,7 @@ namespace QuickFury {
             if (!QuickFurySettings.SkinIndex) return;
 
             try {
-                var avatarWrapper = avatarObjectField.GetValue(__instance);
-                var avatar = ArmatureReflection.GetGameObject(avatarWrapper, gameObjectField);
+                var avatar = ArmatureReflection.GetAvatar(__instance, ArmatureReflection.ArmatureLinkAvatarField);
                 if (avatar == null) return;
                 active = new Context { Avatar = avatar };
             } catch (Exception e) {
@@ -114,8 +106,8 @@ namespace QuickFury {
             var context = active;
             if (context == null) return true;
 
-            var from = ArmatureReflection.GetGameObject(__0, gameObjectField)?.transform;
-            var to = ArmatureReflection.GetGameObject(__1, gameObjectField)?.transform;
+            var from = ArmatureReflection.GetGameObject(__0)?.transform;
+            var to = ArmatureReflection.GetGameObject(__1)?.transform;
             if (from == null || to == null) return true;
 
             context.Rewrites.Add(new Rewrite {

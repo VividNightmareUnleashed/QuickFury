@@ -1,8 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using HarmonyLib;
 using UnityEditor;
 using UnityEngine;
@@ -18,51 +16,32 @@ namespace QuickFury {
         private sealed class Context {
             internal GameObject Avatar;
             internal readonly HashSet<int> Immovable = new HashSet<int>();
+            internal object DeferredService;
+            internal IList Deferred;
         }
 
         [ThreadStatic] private static Context active;
-        private static FieldInfo avatarObjectField;
-        private static FieldInfo gameObjectField;
-        private static FieldInfo deferredField;
-        private static MethodInfo removeFromPhysbones;
+        private static VrcfuryCompatibility compatibility;
 
-        internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
-            var armatureType = VrcfuryCompatibility.FindType("VF.Service.ArmatureLinkService");
-            var wrapperType = VrcfuryCompatibility.FindType("VF.Utils.VFGameObject");
+        internal static void Install(Harmony harmony, VrcfuryCompatibility targets) {
+            compatibility = targets;
+
             var moveType = VrcfuryCompatibility.FindType("VF.Service.ObjectMoveService");
-            var physboneType = VrcfuryCompatibility.FindType("VF.Utils.PhysboneUtils");
-            var apply = armatureType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Apply"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 0);
-            var move = moveType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Move"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 5);
-            avatarObjectField = armatureType?.GetField(
-                "avatarObject",
-                BindingFlags.Instance | BindingFlags.NonPublic
+            var move = VrcfuryCompatibility.FindUniqueMethod(
+                moveType,
+                "Move",
+                method => method.ReturnType == typeof(void) && method.GetParameters().Length == 5
             );
-            gameObjectField = wrapperType?.GetField("_gameObject", BindingFlags.Instance | BindingFlags.NonPublic);
-            deferredField = moveType?.GetField("deferred", BindingFlags.Instance | BindingFlags.NonPublic);
-            removeFromPhysbones = physboneType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "RemoveFromPhysbones"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 2
-                                           && method.GetParameters()[1].ParameterType == typeof(bool));
 
-            if (apply == null || move == null || avatarObjectField == null || gameObjectField == null
-                              || deferredField == null || removeFromPhysbones == null) {
+            if (!ArmatureReflection.ArmatureLinkAvailable || move == null
+                || ArmatureReflection.RemoveFromPhysbones == null || targets.DeferredMoves == null) {
                 Debug.LogWarning("[QuickFury] Fast Armature Link moves disabled: target mismatch.");
                 return;
             }
 
             try {
                 harmony.Patch(
-                    apply,
+                    ArmatureReflection.ArmatureLinkApply,
                     prefix: new HarmonyMethod(typeof(FastArmatureMovePatch), nameof(Begin)),
                     finalizer: new HarmonyMethod(typeof(FastArmatureMovePatch), nameof(End))
                 );
@@ -80,8 +59,7 @@ namespace QuickFury {
             if (!QuickFurySettings.FastArmatureMove) return;
 
             try {
-                var avatarWrapper = avatarObjectField.GetValue(__instance);
-                var avatar = ArmatureReflection.GetGameObject(avatarWrapper, gameObjectField);
+                var avatar = ArmatureReflection.GetAvatar(__instance, ArmatureReflection.ArmatureLinkAvatarField);
                 if (avatar == null) return;
 
                 var context = new Context { Avatar = avatar };
@@ -122,20 +100,32 @@ namespace QuickFury {
             // Armature Link always defers; retain VRCFury for any unexpected immediate move.
             if (context == null || !__4) return true;
 
+            GameObject obj;
+            GameObject newParent;
+            IList deferred;
+            try {
+                obj = ArmatureReflection.GetGameObject(__0);
+                newParent = ArmatureReflection.GetGameObject(__1);
+                if (obj == null || context.Avatar == null) return true;
+                deferred = GetDeferred(context, __instance);
+                if (deferred == null) return true;
+            } catch (Exception e) {
+                active = null;
+                Debug.LogWarning("[QuickFury] Fast Armature Link moves fell back to VRCFury: " + e.Message);
+                return true;
+            }
+
+            if (context.Immovable.Contains(obj.transform.GetInstanceID())) {
+                // Deliberately outside the fallback scope: this must reach VRCFury's caller
+                // exactly like the stock immovable-object error.
+                throw new Exception(
+                    $"VRCFury is trying to move the {obj.name} object, but bones / root avatar objects cannot be moved." +
+                    " You are probably trying to do something weird in one of your VRCFury components. Don't do that."
+                );
+            }
+
             var mutated = false;
             try {
-                var obj = ArmatureReflection.GetGameObject(__0, gameObjectField);
-                var newParent = ArmatureReflection.GetGameObject(__1, gameObjectField);
-                if (obj == null || context.Avatar == null) return true;
-                var deferred = deferredField.GetValue(__instance) as IList;
-                if (deferred == null) return true;
-                if (context.Immovable.Contains(obj.transform.GetInstanceID())) {
-                    throw new Exception(
-                        $"VRCFury is trying to move the {obj.name} object, but bones / root avatar objects cannot be moved." +
-                        " You are probably trying to do something weird in one of your VRCFury components. Don't do that."
-                    );
-                }
-
                 var oldPath = AnimationUtility.CalculateTransformPath(
                     obj.transform,
                     context.Avatar.transform
@@ -149,11 +139,14 @@ namespace QuickFury {
                     context.Avatar.transform
                 );
 
-                VrcfuryCompatibility.InvokeUnwrapped(removeFromPhysbones, null, new object[] { __0, true });
+                VrcfuryCompatibility.InvokeUnwrapped(
+                    ArmatureReflection.RemoveFromPhysbones,
+                    null,
+                    new object[] { __0, true }
+                );
                 deferred.Add((oldPath, newPath));
                 return false;
             } catch (Exception e) {
-                if (e.Message.StartsWith("VRCFury is trying to move the ", StringComparison.Ordinal)) throw;
                 // Once hierarchy state changed, running VRCFury's method again would
                 // record the wrong old path. Fail loudly instead of double-applying.
                 if (mutated) throw;
@@ -161,6 +154,16 @@ namespace QuickFury {
                 Debug.LogWarning("[QuickFury] Fast Armature Link moves fell back to VRCFury: " + e.Message);
                 return true;
             }
+        }
+
+        // The service instance and its deferred list are stable for the whole Apply, so
+        // avoid a reflection field read on every one of the thousands of moves.
+        private static IList GetDeferred(Context context, object service) {
+            if (!ReferenceEquals(context.DeferredService, service)) {
+                context.Deferred = compatibility.DeferredMoves.GetValue(service) as IList;
+                context.DeferredService = service;
+            }
+            return context.Deferred;
         }
 
         private static void EnsureAnimationSafeName(Transform transform) {

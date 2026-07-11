@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -28,40 +27,13 @@ namespace QuickFury {
         [ThreadStatic] private static Context active;
 
         private static Type constraintType;
-        private static FieldInfo avatarObjectField;
-        private static FieldInfo hapticAvatarObjectField;
-        private static FieldInfo gameObjectField;
         private static MethodInfo createConstraint;
         private static MethodInfo getAffectedObject;
         private static MethodInfo getConstraintComponent;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
-            var armatureType = VrcfuryCompatibility.FindType("VF.Service.ArmatureLinkService");
-            var hapticType = VrcfuryCompatibility.FindType("VF.Service.BakeHapticSocketsService");
-            var vfGameObjectType = VrcfuryCompatibility.FindType("VF.Utils.VFGameObject");
             constraintType = VrcfuryCompatibility.FindType("VF.Utils.VFConstraint");
 
-            var apply = armatureType?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Apply" && method.GetParameters().Length == 0);
-            var hapticApply = hapticType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Apply" && method.GetParameters().Length == 0);
-            var getConstraints = vfGameObjectType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => {
-                    if (method.Name != "GetConstraints" || !method.ReturnType.IsArray) return false;
-                    var parameters = method.GetParameters();
-                    return parameters.Length == 2
-                           && parameters[0].ParameterType == typeof(bool)
-                           && parameters[1].ParameterType == typeof(bool);
-                });
-
-            avatarObjectField = armatureType?.GetField("avatarObject", BindingFlags.Instance | BindingFlags.NonPublic);
-            hapticAvatarObjectField = hapticType?.GetField(
-                "avatarObject",
-                BindingFlags.Instance | BindingFlags.NonPublic
-            );
-            gameObjectField = vfGameObjectType?.GetField("_gameObject", BindingFlags.Instance | BindingFlags.NonPublic);
             createConstraint = constraintType?.GetMethod(
                 "CreateOrNull",
                 BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
@@ -69,37 +41,38 @@ namespace QuickFury {
                 new[] { typeof(Component) },
                 null
             );
-            getAffectedObject = constraintType?.GetMethod(
+            getAffectedObject = VrcfuryCompatibility.FindUniqueMethod(
+                constraintType,
                 "GetAffectedObject",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+                method => method.GetParameters().Length == 0
             );
-            getConstraintComponent = constraintType?.GetMethod(
+            getConstraintComponent = VrcfuryCompatibility.FindUniqueMethod(
+                constraintType,
                 "GetComponent",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+                method => method.GetParameters().Length == 0
             );
 
-            if (apply == null || hapticApply == null || getConstraints == null || constraintType == null
-                              || avatarObjectField == null || hapticAvatarObjectField == null
-                              || gameObjectField == null
-                              || createConstraint == null || getAffectedObject == null
-                              || getConstraintComponent == null) {
+            if (!ArmatureReflection.ArmatureLinkAvailable || !ArmatureReflection.HapticSocketsAvailable
+                || ArmatureReflection.GetConstraintsMethod == null || constraintType == null
+                || createConstraint == null || getAffectedObject == null
+                || getConstraintComponent == null) {
                 Debug.LogWarning("[QuickFury] Armature constraint index disabled: target signature mismatch.");
                 return;
             }
 
             try {
                 harmony.Patch(
-                    apply,
+                    ArmatureReflection.ArmatureLinkApply,
                     prefix: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(Begin)),
                     finalizer: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(End))
                 );
                 harmony.Patch(
-                    hapticApply,
+                    ArmatureReflection.HapticSocketsApply,
                     prefix: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(BeginHaptics)),
                     finalizer: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(End))
                 );
                 harmony.Patch(
-                    getConstraints,
+                    ArmatureReflection.GetConstraintsMethod,
                     prefix: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(GetConstraints))
                 );
             } catch (Exception e) {
@@ -108,11 +81,11 @@ namespace QuickFury {
         }
 
         private static void Begin(object __instance) {
-            BeginWithField(__instance, avatarObjectField);
+            BeginWithField(__instance, ArmatureReflection.ArmatureLinkAvatarField);
         }
 
         private static void BeginHaptics(object __instance) {
-            BeginWithField(__instance, hapticAvatarObjectField);
+            BeginWithField(__instance, ArmatureReflection.HapticSocketsAvatarField);
         }
 
         private static void BeginWithField(object instance, FieldInfo avatarField) {
@@ -120,18 +93,19 @@ namespace QuickFury {
             if (!QuickFurySettings.ConstraintIndex) return;
 
             try {
-                var avatarWrapper = avatarField.GetValue(instance);
-                var avatar = ArmatureReflection.GetGameObject(avatarWrapper, gameObjectField);
+                var avatar = ArmatureReflection.GetAvatar(instance, avatarField);
                 if (avatar == null) return;
 
                 var context = new Context();
                 foreach (var component in avatar.GetComponentsInChildren<Component>(true)) {
-                    if (component == null) continue;
+                    // CreateOrNull only wraps IConstraint/VRCConstraintBase components, so
+                    // don't pay a reflection invoke for the avatar's many Transforms.
+                    if (component == null || component is Transform) continue;
                     var wrapper = createConstraint.Invoke(null, new object[] { component });
                     if (wrapper == null) continue;
 
                     var affectedWrapper = getAffectedObject.Invoke(wrapper, null);
-                    var affected = ArmatureReflection.GetGameObject(affectedWrapper, gameObjectField)?.transform;
+                    var affected = ArmatureReflection.GetGameObject(affectedWrapper)?.transform;
                     var constraintComponent = getConstraintComponent.Invoke(wrapper, null) as Component;
                     if (affected == null || constraintComponent == null) continue;
 
@@ -170,7 +144,7 @@ namespace QuickFury {
             var context = active;
             if (context == null) return true;
 
-            var requestedObject = ArmatureReflection.GetGameObject(__instance, gameObjectField);
+            var requestedObject = ArmatureReflection.GetGameObject(__instance);
             if (requestedObject == null) return true;
             var requested = requestedObject.transform;
 
@@ -180,8 +154,12 @@ namespace QuickFury {
                     AddBucket(context, current, entries);
                 }
             } else if (__1) {
-                foreach (var child in requested.GetComponentsInChildren<Transform>(true)) {
-                    AddBucket(context, child, entries);
+                // The avatar holds few constraints but a pruned subtree can hold thousands
+                // of transforms, so test the indexed entries instead of scanning children.
+                foreach (var entry in context.Entries) {
+                    if (entry.Affected != null && entry.Affected.IsChildOf(requested)) {
+                        entries.Add(entry);
+                    }
                 }
             } else {
                 AddBucket(context, requested, entries);

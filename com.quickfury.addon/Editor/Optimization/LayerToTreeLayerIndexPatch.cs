@@ -37,38 +37,28 @@ namespace QuickFury {
             var serviceType = VrcfuryCompatibility.FindType("VF.Service.LayerToTreeService");
             var layerType = VrcfuryCompatibility.FindType("VF.Utils.Controller.VFLayer");
 
-            var apply = serviceType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Apply"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 0);
-            var getLayerId = layerType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "GetLayerId"
-                                           && method.ReturnType == typeof(int)
-                                           && method.GetParameters().Length == 0);
-            var exists = layerType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Exists"
-                                           && method.ReturnType == typeof(bool)
-                                           && method.GetParameters().Length == 0);
-            var remove = layerType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Remove"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 0);
-            var move = layerType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Move"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 1
-                                           && method.GetParameters()[0].ParameterType == typeof(int));
+            var apply = VrcfuryCompatibility.FindNoArgVoid(serviceType, "Apply");
+            var getLayerId = VrcfuryCompatibility.FindUniqueMethod(
+                layerType,
+                "GetLayerId",
+                method => method.ReturnType == typeof(int) && method.GetParameters().Length == 0
+            );
+            var exists = VrcfuryCompatibility.FindUniqueMethod(
+                layerType,
+                "Exists",
+                method => method.ReturnType == typeof(bool) && method.GetParameters().Length == 0
+            );
+            var remove = VrcfuryCompatibility.FindNoArgVoid(layerType, "Remove");
+            var move = VrcfuryCompatibility.FindUniqueMethod(
+                layerType,
+                "Move",
+                method => method.ReturnType == typeof(void)
+                          && method.GetParameters().Length == 1
+                          && method.GetParameters()[0].ParameterType == typeof(int)
+            );
 
             controllerField = layerType?.GetField("ctrl", BindingFlags.Instance | BindingFlags.NonPublic);
-            stateMachineField = layerType?.GetField(
-                "rootStateMachine",
-                BindingFlags.Instance | BindingFlags.NonPublic
-            );
+            stateMachineField = compatibility.VfLayerRootStateMachine;
 
             if (apply == null || getLayerId == null || exists == null || remove == null || move == null
                               || controllerField == null || stateMachineField == null) {
@@ -92,11 +82,11 @@ namespace QuickFury {
                 );
                 harmony.Patch(
                     remove,
-                    postfix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(LayerOrderChanged))
+                    postfix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(LayerRemoved))
                 );
                 harmony.Patch(
                     move,
-                    postfix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(LayerOrderChanged))
+                    postfix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(LayerMoved))
                 );
             } catch (Exception e) {
                 Debug.LogWarning("[QuickFury] Layer-to-tree layer index disabled: " + e.Message);
@@ -176,7 +166,7 @@ namespace QuickFury {
             }
         }
 
-        private static void LayerOrderChanged(object __instance) {
+        private static void LayerMoved(object __instance) {
             var context = active;
             if (context == null) return;
 
@@ -186,6 +176,36 @@ namespace QuickFury {
                 if (context.Controllers.TryGetValue(controller.GetInstanceID(), out var index)) {
                     Rebuild(index);
                 }
+            } catch (Exception e) {
+                active = null;
+                Debug.LogWarning("[QuickFury] Layer-to-tree layer index fell back to VRCFury: " + e.Message);
+            }
+        }
+
+        private static void LayerRemoved(object __instance) {
+            var context = active;
+            if (context == null) return;
+
+            try {
+                var controller = controllerField.GetValue(__instance) as AnimatorController;
+                if (controller == null) return;
+                if (!context.Controllers.TryGetValue(controller.GetInstanceID(), out var index)) return;
+
+                var stateMachine = stateMachineField.GetValue(__instance) as AnimatorStateMachine;
+                if (stateMachine != null
+                    && index.LayerByStateMachineId.TryGetValue(stateMachine.GetInstanceID(), out var removedIndex)) {
+                    // LayerToTreeService removes many layers; shifting the retained indexes
+                    // avoids re-cloning Controller.layers once per removal.
+                    index.LayerByStateMachineId.Remove(stateMachine.GetInstanceID());
+                    foreach (var key in index.LayerByStateMachineId.Keys.ToList()) {
+                        var layerIndex = index.LayerByStateMachineId[key];
+                        if (layerIndex > removedIndex) index.LayerByStateMachineId[key] = layerIndex - 1;
+                    }
+                    return;
+                }
+
+                // A removal the index never observed: fall back to a full rebuild.
+                Rebuild(index);
             } catch (Exception e) {
                 active = null;
                 Debug.LogWarning("[QuickFury] Layer-to-tree layer index fell back to VRCFury: " + e.Message);

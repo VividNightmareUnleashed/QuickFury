@@ -1,6 +1,4 @@
 using System;
-using System.Linq;
-using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
@@ -15,27 +13,21 @@ namespace QuickFury {
         [ThreadStatic] private static bool suppress;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
-            var armatureType = VrcfuryCompatibility.FindType("VF.Service.ArmatureLinkService");
             var uploadHookType = VrcfuryCompatibility.FindType("VF.Hooks.IsActuallyUploadingHook");
-            var apply = armatureType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Apply"
-                                           && method.ReturnType == typeof(void)
-                                           && method.GetParameters().Length == 0);
-            var get = uploadHookType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Get"
-                                           && method.ReturnType == typeof(bool)
-                                           && method.GetParameters().Length == 0);
+            var get = VrcfuryCompatibility.FindUniqueMethod(
+                uploadHookType,
+                "Get",
+                method => method.ReturnType == typeof(bool) && method.GetParameters().Length == 0
+            );
 
-            if (apply == null || get == null) {
+            if (!ArmatureReflection.ArmatureLinkAvailable || get == null) {
                 Debug.LogWarning("[QuickFury] Armature debug-component suppression disabled: target mismatch.");
                 return;
             }
 
             try {
                 harmony.Patch(
-                    apply,
+                    ArmatureReflection.ArmatureLinkApply,
                     prefix: new HarmonyMethod(typeof(ArmatureDebugInfoPatch), nameof(Begin)),
                     finalizer: new HarmonyMethod(typeof(ArmatureDebugInfoPatch), nameof(End))
                 );
@@ -59,6 +51,11 @@ namespace QuickFury {
 
         private static bool ReportUploading(ref bool __result) {
             if (!suppress) return true;
+            // Apply reads this hook exactly once, up front, to decide whether to create
+            // debug components. Override only that read: later consumers inside the same
+            // phase (component-deletion prevention during pruning, exception reporting)
+            // must still see the real upload state.
+            suppress = false;
             __result = true;
             return false;
         }

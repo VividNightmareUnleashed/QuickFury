@@ -29,19 +29,16 @@ namespace QuickFury {
             internal int SavedStandaloneRoots;
         }
 
-        [ThreadStatic] private static Stack<ScanSession> scanSessions;
+        // SaveAssetsService.Run does not re-enter, so one active session is enough.
+        [ThreadStatic] private static ScanSession scanSession;
 
+        private static VrcfuryCompatibility compatibility;
         private static MethodInfo saveAssetAndChildren;
         private static FieldInfo createdAssets;
-        private static MethodInfo didCreate;
 
-        internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
-            var saveAssetsType = compatibility.AvatarEditorAssembly.GetType("VF.Service.SaveAssetsService", false);
-            var run = VrcfuryCompatibility.FindUniqueMethod(
-                saveAssetsType,
-                "Run",
-                method => method.ReturnType == typeof(void) && method.GetParameters().Length == 0
-            );
+        internal static void Install(Harmony harmony, VrcfuryCompatibility targets) {
+            compatibility = targets;
+            var run = targets.SaveAssetsRun;
 
             var sessionType = VrcfuryCompatibility.FindType("VF.Utils.SaveAssetsSession");
             var saveComponent = VrcfuryCompatibility.FindUniqueMethod(
@@ -71,14 +68,9 @@ namespace QuickFury {
 
             var factoryType = VrcfuryCompatibility.FindType("VF.Utils.VrcfObjectFactory");
             createdAssets = factoryType?.GetField("created", BindingFlags.Static | BindingFlags.NonPublic);
-            didCreate = factoryType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "DidCreate"
-                                           && method.ReturnType == typeof(bool)
-                                           && method.GetParameters().Length == 1);
 
             if (run == null || saveComponent == null || saveAssetAndChildren == null
-                            || createdAssets == null || didCreate == null) {
+                            || createdAssets == null || targets.FactoryDidCreate == null) {
                 Debug.LogWarning(
                     "[QuickFury] Fast SaveAssets discovery disabled: expected VRCFury members were not found."
                 );
@@ -107,30 +99,25 @@ namespace QuickFury {
                 FastDiscovery = QuickFurySettings.FastSaveAssetDiscovery
             };
             __state = session.SkipTransforms || session.SkipDuplicates || session.FastDiscovery;
-            if (!__state) return;
-
-            if (scanSessions == null) scanSessions = new Stack<ScanSession>();
-            scanSessions.Push(session);
+            if (__state) scanSession = session;
         }
 
         private static Exception RunFinalizer(bool __state, Exception __exception) {
-            if (!__state || scanSessions == null || scanSessions.Count == 0) return __exception;
+            var session = scanSession;
+            if (!__state || session == null) return __exception;
 
-            var session = scanSessions.Peek();
             Debug.Log(
                 $"[QuickFury] SaveAssets discovery: skipped {session.SkippedComponentScans} component scans, " +
                 $"saved {session.SavedStandaloneRoots} standalone generated roots, skipped " +
                 $"{session.SkippedTransforms} Transform scans and {session.SkippedDuplicates} duplicates."
             );
-            scanSessions.Pop();
-            if (scanSessions.Count == 0) scanSessions = null;
+            scanSession = null;
             return __exception;
         }
 
         private static bool SaveComponentPrefix(object __instance, Component component, string tmpDir) {
-            if (scanSessions == null || scanSessions.Count == 0 || component == null) return true;
-
-            var session = scanSessions.Peek();
+            var session = scanSession;
+            if (session == null || component == null) return true;
             if (session.FastDiscovery) {
                 if (!session.SecondPass && component is Renderer) {
                     // Unity's native collector finds renderer roots without walking the
@@ -254,7 +241,7 @@ namespace QuickFury {
         }
 
         private static bool DidCreate(Object asset) {
-            return (bool)VrcfuryCompatibility.InvokeUnwrapped(didCreate, null, new object[] { asset });
+            return compatibility.DidCreate(asset);
         }
     }
 }

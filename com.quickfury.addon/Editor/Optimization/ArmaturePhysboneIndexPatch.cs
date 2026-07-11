@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
@@ -21,41 +20,15 @@ namespace QuickFury {
         [ThreadStatic] private static Context active;
 
         private static Type physboneType;
-        private static FieldInfo avatarObjectField;
-        private static FieldInfo hapticAvatarObjectField;
-        private static FieldInfo gameObjectField;
         private static FieldInfo ignoreTransformsField;
         private static MethodInfo getRootTransform;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
-            var armatureType = VrcfuryCompatibility.FindType("VF.Service.ArmatureLinkService");
-            var hapticType = VrcfuryCompatibility.FindType("VF.Service.BakeHapticSocketsService");
-            var vfGameObjectType = VrcfuryCompatibility.FindType("VF.Utils.VFGameObject");
-            var physboneUtilsType = VrcfuryCompatibility.FindType("VF.Utils.PhysboneUtils");
             physboneType = VrcfuryCompatibility.FindType(
                 "VRC.SDK3.Dynamics.PhysBone.Components.VRCPhysBone"
             );
             var physboneBaseType = VrcfuryCompatibility.FindType("VRC.Dynamics.VRCPhysBoneBase");
 
-            var apply = armatureType?.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Apply" && method.GetParameters().Length == 0);
-            var hapticApply = hapticType?
-                .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Apply" && method.GetParameters().Length == 0);
-            var remove = physboneUtilsType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => {
-                    if (method.Name != "RemoveFromPhysbones") return false;
-                    var parameters = method.GetParameters();
-                    return parameters.Length == 2 && parameters[1].ParameterType == typeof(bool);
-                });
-
-            avatarObjectField = armatureType?.GetField("avatarObject", BindingFlags.Instance | BindingFlags.NonPublic);
-            hapticAvatarObjectField = hapticType?.GetField(
-                "avatarObject",
-                BindingFlags.Instance | BindingFlags.NonPublic
-            );
-            gameObjectField = vfGameObjectType?.GetField("_gameObject", BindingFlags.Instance | BindingFlags.NonPublic);
             ignoreTransformsField = ArmatureReflection.FindFieldInHierarchy(physboneBaseType, "ignoreTransforms");
             getRootTransform = physboneBaseType?.GetMethod(
                 "GetRootTransform",
@@ -65,27 +38,26 @@ namespace QuickFury {
                 null
             );
 
-            if (apply == null || hapticApply == null || remove == null || physboneType == null
-                              || avatarObjectField == null || hapticAvatarObjectField == null
-                              || gameObjectField == null || ignoreTransformsField == null
-                              || getRootTransform == null) {
+            if (!ArmatureReflection.ArmatureLinkAvailable || !ArmatureReflection.HapticSocketsAvailable
+                || ArmatureReflection.RemoveFromPhysbones == null || physboneType == null
+                || ignoreTransformsField == null || getRootTransform == null) {
                 Debug.LogWarning("[QuickFury] Armature PhysBone index disabled: target signature mismatch.");
                 return;
             }
 
             try {
                 harmony.Patch(
-                    apply,
+                    ArmatureReflection.ArmatureLinkApply,
                     prefix: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(Begin)),
                     finalizer: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(End))
                 );
                 harmony.Patch(
-                    hapticApply,
+                    ArmatureReflection.HapticSocketsApply,
                     prefix: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(BeginHaptics)),
                     finalizer: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(End))
                 );
                 harmony.Patch(
-                    remove,
+                    ArmatureReflection.RemoveFromPhysbones,
                     prefix: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(RemoveFromPhysbones))
                 );
             } catch (Exception e) {
@@ -94,11 +66,11 @@ namespace QuickFury {
         }
 
         private static void Begin(object __instance) {
-            BeginWithField(__instance, avatarObjectField);
+            BeginWithField(__instance, ArmatureReflection.ArmatureLinkAvatarField);
         }
 
         private static void BeginHaptics(object __instance) {
-            BeginWithField(__instance, hapticAvatarObjectField);
+            BeginWithField(__instance, ArmatureReflection.HapticSocketsAvatarField);
         }
 
         private static void BeginWithField(object instance, FieldInfo avatarField) {
@@ -106,11 +78,10 @@ namespace QuickFury {
             if (!QuickFurySettings.PhysboneIndex) return;
 
             try {
-                var avatarWrapper = avatarField.GetValue(instance);
-                var avatar = ArmatureReflection.GetGameObject(avatarWrapper, gameObjectField);
+                var avatar = ArmatureReflection.GetAvatar(instance, avatarField);
                 if (avatar == null) return;
                 var context = new Context();
-                foreach (var component in avatar.GetComponentsInChildren(physboneType, true).OfType<Component>()) {
+                foreach (var component in avatar.GetComponentsInChildren(physboneType, true)) {
                     if (component == null) continue;
                     var root = getRootTransform.Invoke(component, null) as Transform;
                     if (root == null) continue;
@@ -137,7 +108,7 @@ namespace QuickFury {
             var context = active;
             if (context == null || !__1) return true;
 
-            var gameObject = ArmatureReflection.GetGameObject(__0, gameObjectField);
+            var gameObject = ArmatureReflection.GetGameObject(__0);
             if (gameObject == null) return true;
             var transform = gameObject.transform;
 

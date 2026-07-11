@@ -31,11 +31,15 @@ namespace QuickFury {
         [ThreadStatic] private static bool detailed;
 
         private static VrcfuryCompatibility compatibility;
+        private static Harmony harmonyInstance;
+        private static bool detailedTargetsInstalled;
         private static bool active;
         private static long runStarted;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility targets) {
             compatibility = targets;
+            harmonyInstance = harmony;
+            detailedTargetsInstalled = false;
 
             harmony.Patch(
                 targets.RunMain,
@@ -48,11 +52,22 @@ namespace QuickFury {
                 finalizer: new HarmonyMethod(typeof(ProfilePatches), nameof(ActionFinalizer))
             );
 
+            // The ~40 per-method patches put permanent Harmony trampolines on VRCFury's
+            // hottest internals, so only install them while detailed profiling is wanted.
+            // Turning the toggle on later installs them on the spot; turning it off stops
+            // the timing per run and sheds the trampolines on the next domain reload.
+            if (QuickFurySettings.DetailedProfiling) EnsureDetailedTargetsInstalled();
+        }
+
+        internal static void EnsureDetailedTargetsInstalled() {
+            if (detailedTargetsInstalled || harmonyInstance == null) return;
+            detailedTargetsInstalled = true;
+
             foreach (var (typeName, methodNames) in DetailedTargets) {
                 foreach (var methodName in methodNames) {
                     foreach (var method in VrcfuryCompatibility.FindDeclaredMethods(typeName, methodName)) {
                         try {
-                            harmony.Patch(
+                            harmonyInstance.Patch(
                                 method,
                                 prefix: new HarmonyMethod(typeof(ProfilePatches), nameof(MethodPrefix)),
                                 finalizer: new HarmonyMethod(typeof(ProfilePatches), nameof(MethodFinalizer))
@@ -144,15 +159,24 @@ namespace QuickFury {
             return __exception;
         }
 
+        private static readonly Dictionary<MethodBase, string> MethodKeys =
+            new Dictionary<MethodBase, string>();
+
+        private static string BuildKey(MethodBase method) {
+            if (!MethodKeys.TryGetValue(method, out var key)) {
+                key = method.DeclaringType?.Name + "." + method.Name;
+                MethodKeys[method] = key;
+            }
+            return actionFrames != null && actionFrames.Count > 0
+                ? actionFrames.Peek().Key + " > " + key
+                : key;
+        }
+
         private static void MethodPrefix(MethodBase __originalMethod) {
             if (!active || !detailed) return;
 
-            var key = __originalMethod.DeclaringType?.Name + "." + __originalMethod.Name;
-            if (actionFrames != null && actionFrames.Count > 0) {
-                key = actionFrames.Peek().Key + " > " + key;
-            }
             methodFrames.Push(new Frame {
-                Key = key,
+                Key = BuildKey(__originalMethod),
                 Started = Stopwatch.GetTimestamp()
             });
         }
@@ -162,10 +186,7 @@ namespace QuickFury {
                 return __exception;
             }
 
-            var expected = __originalMethod.DeclaringType?.Name + "." + __originalMethod.Name;
-            if (actionFrames != null && actionFrames.Count > 0) {
-                expected = actionFrames.Peek().Key + " > " + expected;
-            }
+            var expected = BuildKey(__originalMethod);
             var frame = methodFrames.Pop();
             if (frame.Key != expected) {
                 methodFrames.Clear();
@@ -210,28 +231,7 @@ namespace QuickFury {
             }
 
             builder.AppendLine(
-                $"Optimization flags: orderedPaths={QuickFurySettings.OptimizeOrderedPaths}, " +
-                $"skipEmptyDeferred={QuickFurySettings.SkipEmptyDeferredRewrite}, " +
-                $"constraintIndex={QuickFurySettings.ConstraintIndex}, " +
-                $"physboneIndex={QuickFurySettings.PhysboneIndex}, " +
-                $"skinIndex={QuickFurySettings.SkinIndex}, " +
-                $"destroyIndex={QuickFurySettings.DestroyIndex}, " +
-                $"skipArmatureDebugInfo={QuickFurySettings.SkipArmatureDebugInfo}, " +
-                $"fastArmatureMove={QuickFurySettings.FastArmatureMove}, " +
-                $"layerIndex={QuickFurySettings.LayerToTreeLayerIndex}, " +
-                $"trackingBehaviourIndex={QuickFurySettings.TrackingBehaviourIndex}, " +
-                $"behaviourContainerFilter={QuickFurySettings.BehaviourContainerFilter}, " +
-                $"deduplicateGeneratedClips={QuickFurySettings.DeduplicateGeneratedClips}, " +
-                $"skipTransformAssetScan={QuickFurySettings.SkipTransformAssetScan}, " +
-                $"skipDuplicateRendererAssetScan={QuickFurySettings.SkipDuplicateRendererAssetScan}"
-                + $", retainSaveAssetsBatching={QuickFurySettings.RetainSaveAssetsBatching}"
-                + $", fastSaveAssetDiscovery={QuickFurySettings.FastSaveAssetDiscovery}"
-                + $", fastControllerAssetGraph={QuickFurySettings.FastControllerAssetGraph}"
-                + $", consolidatedAssetContainer={QuickFurySettings.ConsolidatedAssetContainer}"
-                + $", blendshapeBindingCache={QuickFurySettings.BlendshapeBindingCache}"
-                + $", spsCoveredRenderer={QuickFurySettings.SpsCoveredRenderer}"
-                + $", spsMaterialProbeCache={QuickFurySettings.SpsMaterialProbeCache}"
-                + $", controllerParameterIndex={QuickFurySettings.ControllerParameterIndex}"
+                "Optimization flags: " + QuickFurySettings.DescribeOptimizationFlags()
                 + $", controllerGraphStats={FastControllerAssetGraphPatch.LastStats}"
                 + $", spsProbeStats={SpsCoveredRendererPatch.LastStats}"
                 + $", behaviourFilterStats={BehaviourContainerFilterPatch.LastStats}"
@@ -262,7 +262,7 @@ namespace QuickFury {
             }
         }
 
-        private static double ToMilliseconds(long ticks) {
+        internal static double ToMilliseconds(long ticks) {
             return ticks * 1000.0 / Stopwatch.Frequency;
         }
     }
