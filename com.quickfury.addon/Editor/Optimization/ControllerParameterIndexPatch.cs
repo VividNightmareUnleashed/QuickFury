@@ -25,12 +25,11 @@ namespace QuickFury {
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
             var type = VrcfuryCompatibility.FindType("VF.Utils.Controller.VFController");
             controllerField = type?.GetField("ctrl", BindingFlags.Instance | BindingFlags.NonPublic);
-            var getParam = VrcfuryCompatibility.FindUniqueMethod(
+            var getParam = VrcfuryCompatibility.FindMethodWithSignature(
                 type,
                 "GetParam",
-                method => method.ReturnType == typeof(AnimatorControllerParameter)
-                          && method.GetParameters().Length == 1
-                          && method.GetParameters()[0].ParameterType == typeof(string)
+                typeof(AnimatorControllerParameter),
+                typeof(string)
             );
             var newParam = VrcfuryCompatibility.FindUniqueMethod(
                 type,
@@ -47,33 +46,28 @@ namespace QuickFury {
                 .ToArray() ?? Array.Empty<MethodInfo>();
 
             if (controllerField == null || getParam == null || newParam == null || mutators.Length < 6) {
-                Debug.LogWarning("[QuickFury] Controller parameter index disabled: target signature mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
+            harmony.Patch(
+                compatibility.RunMain,
+                prefix: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(End))
+            );
+            harmony.Patch(
+                getParam,
+                prefix: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(GetParam))
+            );
+            harmony.Patch(
+                newParam,
+                prefix: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(NewParam))
+            );
+            foreach (var mutator in mutators) {
                 harmony.Patch(
-                    compatibility.RunMain,
-                    prefix: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(End))
+                    mutator,
+                    prefix: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(Invalidate)),
+                    postfix: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(Invalidate))
                 );
-                harmony.Patch(
-                    getParam,
-                    prefix: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(GetParam))
-                );
-                harmony.Patch(
-                    newParam,
-                    prefix: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(NewParam))
-                );
-                foreach (var mutator in mutators) {
-                    harmony.Patch(
-                        mutator,
-                        prefix: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(Invalidate)),
-                        postfix: new HarmonyMethod(typeof(ControllerParameterIndexPatch), nameof(Invalidate))
-                    );
-                }
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Controller parameter index disabled: " + e.Message);
             }
         }
 

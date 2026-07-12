@@ -19,6 +19,7 @@ namespace QuickFury {
 
         private sealed class Frame {
             internal string Key;
+            internal MethodBase Method;
             internal long Started;
             internal long ChildTicks;
         }
@@ -30,14 +31,12 @@ namespace QuickFury {
         [ThreadStatic] private static Stack<Frame> methodFrames;
         [ThreadStatic] private static bool detailed;
 
-        private static VrcfuryCompatibility compatibility;
         private static Harmony harmonyInstance;
         private static bool detailedTargetsInstalled;
         private static bool active;
         private static long runStarted;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility targets) {
-            compatibility = targets;
             harmonyInstance = harmony;
             detailedTargetsInstalled = false;
 
@@ -140,8 +139,9 @@ namespace QuickFury {
 
             string key;
             try {
-                var service = compatibility.ActionGetService.Invoke(__instance, null);
-                var methodName = compatibility.ActionGetName.Invoke(__instance, null) as string ?? "?";
+                var targets = QuickFuryBootstrap.Compatibility;
+                var service = targets.ActionGetService.Invoke(__instance, null);
+                var methodName = targets.ActionGetName.Invoke(__instance, null) as string ?? "?";
                 key = (service?.GetType().Name ?? "?") + "." + methodName;
             } catch {
                 key = "UnknownAction";
@@ -161,15 +161,24 @@ namespace QuickFury {
 
         private static readonly Dictionary<MethodBase, string> MethodKeys =
             new Dictionary<MethodBase, string>();
+        // The detailed targets include VRCFury's hottest internals, so composed
+        // "action > method" keys are cached per pair instead of concatenated per call.
+        private static readonly Dictionary<(string, MethodBase), string> ComposedKeys =
+            new Dictionary<(string, MethodBase), string>();
 
         private static string BuildKey(MethodBase method) {
             if (!MethodKeys.TryGetValue(method, out var key)) {
                 key = method.DeclaringType?.Name + "." + method.Name;
                 MethodKeys[method] = key;
             }
-            return actionFrames != null && actionFrames.Count > 0
-                ? actionFrames.Peek().Key + " > " + key
-                : key;
+            if (actionFrames == null || actionFrames.Count == 0) return key;
+
+            var actionKey = actionFrames.Peek().Key;
+            if (!ComposedKeys.TryGetValue((actionKey, method), out var composed)) {
+                composed = actionKey + " > " + key;
+                ComposedKeys[(actionKey, method)] = composed;
+            }
+            return composed;
         }
 
         private static void MethodPrefix(MethodBase __originalMethod) {
@@ -177,6 +186,7 @@ namespace QuickFury {
 
             methodFrames.Push(new Frame {
                 Key = BuildKey(__originalMethod),
+                Method = __originalMethod,
                 Started = Stopwatch.GetTimestamp()
             });
         }
@@ -186,9 +196,10 @@ namespace QuickFury {
                 return __exception;
             }
 
-            var expected = BuildKey(__originalMethod);
             var frame = methodFrames.Pop();
-            if (frame.Key != expected) {
+            // Reference-compare the original method instead of recomputing the composed
+            // key; the action context cannot change within one profiled call.
+            if (!ReferenceEquals(frame.Method, __originalMethod)) {
                 methodFrames.Clear();
                 return __exception;
             }

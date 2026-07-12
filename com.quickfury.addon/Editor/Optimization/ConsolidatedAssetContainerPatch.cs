@@ -29,45 +29,35 @@ namespace QuickFury {
             containerType = VrcfuryCompatibility.FindType(
                 "VF.Utils.VRCFuryAssetDatabase+BinaryContainer"
             );
-            saveAsset = VrcfuryCompatibility.FindUniqueMethod(
+            saveAsset = VrcfuryCompatibility.FindMethodWithSignature(
                 databaseType,
                 "SaveAsset",
-                method => {
-                    if (method.ReturnType != typeof(void)) return false;
-                    var parameters = method.GetParameters();
-                    return parameters.Length == 3
-                           && parameters[0].ParameterType == typeof(Object)
-                           && parameters[1].ParameterType == typeof(string)
-                           && parameters[2].ParameterType == typeof(string);
-                }
+                typeof(void),
+                typeof(Object),
+                typeof(string),
+                typeof(string)
             );
-            attachAsset = VrcfuryCompatibility.FindUniqueMethod(
+            attachAsset = VrcfuryCompatibility.FindMethodWithSignature(
                 databaseType,
                 "AttachAsset",
-                method => method.ReturnType == typeof(void)
-                          && method.GetParameters().Length == 2
-                          && method.GetParameters()[0].ParameterType == typeof(Object)
-                          && method.GetParameters()[1].ParameterType == typeof(Object)
+                typeof(void),
+                typeof(Object),
+                typeof(Object)
             );
 
             if (run == null || containerType == null || saveAsset == null || attachAsset == null) {
-                Debug.LogWarning("[QuickFury] Consolidated asset container disabled: target mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    run,
-                    prefix: new HarmonyMethod(typeof(ConsolidatedAssetContainerPatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(ConsolidatedAssetContainerPatch), nameof(End))
-                );
-                harmony.Patch(
-                    saveAsset,
-                    prefix: new HarmonyMethod(typeof(ConsolidatedAssetContainerPatch), nameof(Save))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Consolidated asset container disabled: " + e.Message);
-            }
+            harmony.Patch(
+                run,
+                prefix: new HarmonyMethod(typeof(ConsolidatedAssetContainerPatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(ConsolidatedAssetContainerPatch), nameof(End))
+            );
+            harmony.Patch(
+                saveAsset,
+                prefix: new HarmonyMethod(typeof(ConsolidatedAssetContainerPatch), nameof(Save))
+            );
         }
 
         private static void Begin() {

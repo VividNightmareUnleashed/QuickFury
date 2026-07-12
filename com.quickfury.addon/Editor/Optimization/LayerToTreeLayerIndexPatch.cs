@@ -38,59 +38,40 @@ namespace QuickFury {
             var layerType = VrcfuryCompatibility.FindType("VF.Utils.Controller.VFLayer");
 
             var apply = VrcfuryCompatibility.FindNoArgVoid(serviceType, "Apply");
-            var getLayerId = VrcfuryCompatibility.FindUniqueMethod(
-                layerType,
-                "GetLayerId",
-                method => method.ReturnType == typeof(int) && method.GetParameters().Length == 0
-            );
-            var exists = VrcfuryCompatibility.FindUniqueMethod(
-                layerType,
-                "Exists",
-                method => method.ReturnType == typeof(bool) && method.GetParameters().Length == 0
-            );
+            var getLayerId = VrcfuryCompatibility.FindMethodWithSignature(layerType, "GetLayerId", typeof(int));
+            var exists = VrcfuryCompatibility.FindMethodWithSignature(layerType, "Exists", typeof(bool));
             var remove = VrcfuryCompatibility.FindNoArgVoid(layerType, "Remove");
-            var move = VrcfuryCompatibility.FindUniqueMethod(
-                layerType,
-                "Move",
-                method => method.ReturnType == typeof(void)
-                          && method.GetParameters().Length == 1
-                          && method.GetParameters()[0].ParameterType == typeof(int)
-            );
+            var move = VrcfuryCompatibility.FindMethodWithSignature(layerType, "Move", typeof(void), typeof(int));
 
             controllerField = layerType?.GetField("ctrl", BindingFlags.Instance | BindingFlags.NonPublic);
             stateMachineField = compatibility.VfLayerRootStateMachine;
 
             if (apply == null || getLayerId == null || exists == null || remove == null || move == null
                               || controllerField == null || stateMachineField == null) {
-                Debug.LogWarning("[QuickFury] Layer-to-tree layer index disabled: target signature mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    apply,
-                    prefix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(End))
-                );
-                harmony.Patch(
-                    getLayerId,
-                    prefix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(GetLayerId))
-                );
-                harmony.Patch(
-                    exists,
-                    prefix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(Exists))
-                );
-                harmony.Patch(
-                    remove,
-                    postfix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(LayerRemoved))
-                );
-                harmony.Patch(
-                    move,
-                    postfix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(LayerMoved))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Layer-to-tree layer index disabled: " + e.Message);
-            }
+            harmony.Patch(
+                apply,
+                prefix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(End))
+            );
+            harmony.Patch(
+                getLayerId,
+                prefix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(GetLayerId))
+            );
+            harmony.Patch(
+                exists,
+                prefix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(Exists))
+            );
+            harmony.Patch(
+                remove,
+                postfix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(LayerRemoved))
+            );
+            harmony.Patch(
+                move,
+                postfix: new HarmonyMethod(typeof(LayerToTreeLayerIndexPatch), nameof(LayerMoved))
+            );
         }
 
         private static void Begin() {

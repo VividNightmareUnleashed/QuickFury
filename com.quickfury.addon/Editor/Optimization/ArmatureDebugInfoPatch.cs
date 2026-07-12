@@ -1,6 +1,5 @@
 using System;
 using HarmonyLib;
-using UnityEngine;
 
 namespace QuickFury {
     /// <summary>
@@ -21,23 +20,18 @@ namespace QuickFury {
             );
 
             if (!ArmatureReflection.ArmatureLinkAvailable || get == null) {
-                Debug.LogWarning("[QuickFury] Armature debug-component suppression disabled: target mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    ArmatureReflection.ArmatureLinkApply,
-                    prefix: new HarmonyMethod(typeof(ArmatureDebugInfoPatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(ArmatureDebugInfoPatch), nameof(End))
-                );
-                harmony.Patch(
-                    get,
-                    prefix: new HarmonyMethod(typeof(ArmatureDebugInfoPatch), nameof(ReportUploading))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Armature debug-component suppression disabled: " + e.Message);
-            }
+            harmony.Patch(
+                ArmatureReflection.ArmatureLinkApply,
+                prefix: new HarmonyMethod(typeof(ArmatureDebugInfoPatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(ArmatureDebugInfoPatch), nameof(End))
+            );
+            harmony.Patch(
+                get,
+                prefix: new HarmonyMethod(typeof(ArmatureDebugInfoPatch), nameof(ReportUploading))
+            );
         }
 
         private static void Begin() {

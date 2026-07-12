@@ -10,7 +10,6 @@ namespace QuickFury {
     internal sealed class VrcfuryCompatibility {
         internal const string OptimizedVersion = "1.1348.0";
 
-        internal Assembly AvatarEditorAssembly { get; private set; }
         internal string PackageVersion { get; private set; }
         internal Guid ModuleVersionId { get; private set; }
 
@@ -28,7 +27,12 @@ namespace QuickFury {
         internal FieldInfo VfLayerRootStateMachine { get; private set; }
         internal MethodInfo VfLayerBehaviourContainersGetter { get; private set; }
 
+        // DidCreate runs once per visited node in the controller-graph traversal, so a
+        // bound delegate replaces the MethodInfo.Invoke + object[] allocation there.
+        private Func<Object, bool> didCreateFast;
+
         internal bool DidCreate(Object asset) {
+            if (didCreateFast != null) return didCreateFast(asset);
             return (bool)InvokeUnwrapped(FactoryDidCreate, null, new object[] { asset });
         }
 
@@ -43,17 +47,17 @@ namespace QuickFury {
 
             try {
                 var output = new VrcfuryCompatibility();
-                output.AvatarEditorAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                var avatarEditorAssembly = AppDomain.CurrentDomain.GetAssemblies()
                     .FirstOrDefault(a => a.GetName().Name == "VRCFury-Editor-Avatars");
-                if (output.AvatarEditorAssembly == null) {
+                if (avatarEditorAssembly == null) {
                     error = "VRCFury-Editor-Avatars is not loaded";
                     return false;
                 }
 
-                output.PackageVersion = PackageInfo.FindForAssembly(output.AvatarEditorAssembly)?.version ?? "unknown";
-                output.ModuleVersionId = output.AvatarEditorAssembly.ManifestModule.ModuleVersionId;
+                output.PackageVersion = PackageInfo.FindForAssembly(avatarEditorAssembly)?.version ?? "unknown";
+                output.ModuleVersionId = avatarEditorAssembly.ManifestModule.ModuleVersionId;
 
-                var builderType = output.AvatarEditorAssembly.GetType("VF.Builder.VRCFuryBuilder", false);
+                var builderType = avatarEditorAssembly.GetType("VF.Builder.VRCFuryBuilder", false);
                 output.RunMain = FindUniqueMethod(
                     builderType,
                     "RunMain",
@@ -61,7 +65,7 @@ namespace QuickFury {
                     method => method.ReturnType == typeof(void) && method.GetParameters().Length == 1
                 );
 
-                var actionType = output.AvatarEditorAssembly.GetType("VF.Feature.Base.FeatureBuilderAction", false);
+                var actionType = avatarEditorAssembly.GetType("VF.Feature.Base.FeatureBuilderAction", false);
                 output.ActionCall = FindUniqueMethod(
                     actionType,
                     "Call",
@@ -81,7 +85,7 @@ namespace QuickFury {
                     method => method.ReturnType == typeof(object) && method.GetParameters().Length == 0
                 );
 
-                var objectMoveServiceType = output.AvatarEditorAssembly.GetType("VF.Service.ObjectMoveService", false);
+                var objectMoveServiceType = avatarEditorAssembly.GetType("VF.Service.ObjectMoveService", false);
                 output.ApplyDeferred = FindUniqueMethod(
                     objectMoveServiceType,
                     "ApplyDeferred",
@@ -101,7 +105,7 @@ namespace QuickFury {
                 output.DeferredMoves = objectMoveServiceType?
                     .GetField("deferred", BindingFlags.Instance | BindingFlags.NonPublic);
 
-                var saveAssetsType = output.AvatarEditorAssembly.GetType("VF.Service.SaveAssetsService", false);
+                var saveAssetsType = avatarEditorAssembly.GetType("VF.Service.SaveAssetsService", false);
                 output.SaveAssetsRun = FindNoArgVoid(saveAssetsType, "Run");
 
                 var factoryType = FindType("VF.Utils.VrcfObjectFactory");
@@ -110,6 +114,16 @@ namespace QuickFury {
                     "DidCreate",
                     method => method.ReturnType == typeof(bool) && method.GetParameters().Length == 1
                 );
+                if (output.FactoryDidCreate != null) {
+                    try {
+                        output.didCreateFast = (Func<Object, bool>)Delegate.CreateDelegate(
+                            typeof(Func<Object, bool>),
+                            output.FactoryDidCreate
+                        );
+                    } catch (ArgumentException) {
+                        // Parameter type drifted from Object; the reflection fallback still works.
+                    }
+                }
 
                 var vfLayerType = FindType("VF.Utils.Controller.VFLayer");
                 output.VfLayerRootStateMachine = vfLayerType?
@@ -135,13 +149,26 @@ namespace QuickFury {
         private static readonly Dictionary<string, Type> TypeCache =
             new Dictionary<string, Type>(StringComparer.Ordinal);
 
+        // The ~40 startup lookups cluster in a handful of VRCFury/VRC SDK assemblies, so
+        // probe past hits first instead of scanning the whole AppDomain on every miss.
+        private static readonly List<Assembly> HitAssemblies = new List<Assembly>();
+
         internal static Type FindType(string fullName) {
             if (TypeCache.TryGetValue(fullName, out var cached)) return cached;
 
             Type found = null;
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies()) {
+            foreach (var assembly in HitAssemblies) {
                 found = assembly.GetType(fullName, false);
                 if (found != null) break;
+            }
+            if (found == null) {
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies()) {
+                    found = assembly.GetType(fullName, false);
+                    if (found != null) break;
+                }
+            }
+            if (found != null && !HitAssemblies.Contains(found.Assembly)) {
+                HitAssemblies.Add(found.Assembly);
             }
             TypeCache[fullName] = found;
             return found;
@@ -173,11 +200,24 @@ namespace QuickFury {
         }
 
         internal static MethodInfo FindNoArgVoid(Type type, string name) {
-            return FindUniqueMethod(
-                type,
-                name,
-                method => method.ReturnType == typeof(void) && method.GetParameters().Length == 0
-            );
+            return FindMethodWithSignature(type, name, typeof(void));
+        }
+
+        internal static MethodInfo FindMethodWithSignature(
+            Type type,
+            string name,
+            Type returnType,
+            params Type[] parameterTypes
+        ) {
+            return FindUniqueMethod(type, name, method => {
+                if (method.ReturnType != returnType) return false;
+                var parameters = method.GetParameters();
+                if (parameters.Length != parameterTypes.Length) return false;
+                for (var i = 0; i < parameters.Length; i++) {
+                    if (parameters[i].ParameterType != parameterTypes[i]) return false;
+                }
+                return true;
+            });
         }
 
         internal static object CreateEmptyImmutableSet(Type setType) {

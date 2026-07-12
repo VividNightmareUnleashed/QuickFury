@@ -38,50 +38,38 @@ namespace QuickFury {
                 "RewriteSkins",
                 method => method.ReturnType == typeof(void) && method.GetParameters().Length == 3
             );
-            getMutableMesh = VrcfuryCompatibility.FindUniqueMethod(
+            getMutableMesh = VrcfuryCompatibility.FindMethodWithSignature(
                 rendererExtensions,
                 "GetMutableMesh",
-                method => {
-                    if (method.ReturnType != typeof(Mesh)) return false;
-                    var parameters = method.GetParameters();
-                    return parameters.Length == 2
-                           && parameters[0].ParameterType == typeof(Renderer)
-                           && parameters[1].ParameterType == typeof(string);
-                }
+                typeof(Mesh),
+                typeof(Renderer),
+                typeof(string)
             );
-            dirty = VrcfuryCompatibility.FindUniqueMethod(
+            dirty = VrcfuryCompatibility.FindMethodWithSignature(
                 dirtyUtils,
                 "Dirty",
-                method => {
-                    if (method.ReturnType != typeof(void)) return false;
-                    var parameters = method.GetParameters();
-                    return parameters.Length == 1 && parameters[0].ParameterType == typeof(UnityEngine.Object);
-                }
+                typeof(void),
+                typeof(UnityEngine.Object)
             );
 
             if (!ArmatureReflection.ArmatureLinkAvailable || rewriteSkins == null
                 || compatibility.ApplyDeferred == null || getMutableMesh == null || dirty == null) {
-                Debug.LogWarning("[QuickFury] Batched Armature skin rewrite disabled: target signature mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    ArmatureReflection.ArmatureLinkApply,
-                    prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(End))
-                );
-                harmony.Patch(
-                    rewriteSkins,
-                    prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(RecordRewrite))
-                );
-                harmony.Patch(
-                    compatibility.ApplyDeferred,
-                    prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(Flush))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Batched Armature skin rewrite disabled: " + e.Message);
-            }
+            harmony.Patch(
+                ArmatureReflection.ArmatureLinkApply,
+                prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(End))
+            );
+            harmony.Patch(
+                rewriteSkins,
+                prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(RecordRewrite))
+            );
+            harmony.Patch(
+                compatibility.ApplyDeferred,
+                prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(Flush))
+            );
         }
 
         private static void Begin(object __instance) {
@@ -140,12 +128,7 @@ namespace QuickFury {
             var slotsByBone = new Dictionary<Transform, List<int>>();
             for (var i = 0; i < bones.Length; i++) {
                 var bone = bones[i];
-                if (bone == null) continue;
-                if (!slotsByBone.TryGetValue(bone, out var slots)) {
-                    slots = new List<int>();
-                    slotsByBone[bone] = slots;
-                }
-                slots.Add(i);
+                if (bone != null) slotsByBone.GetOrAddList(bone).Add(i);
             }
 
             Mesh mesh = null;
@@ -173,11 +156,7 @@ namespace QuickFury {
                 }
 
                 slotsByBone.Remove(rewrite.From);
-                if (!slotsByBone.TryGetValue(rewrite.To, out var destinationSlots)) {
-                    destinationSlots = new List<int>();
-                    slotsByBone[rewrite.To] = destinationSlots;
-                }
-                destinationSlots.AddRange(slots);
+                slotsByBone.GetOrAddList(rewrite.To).AddRange(slots);
             }
 
             if (!changed) return;

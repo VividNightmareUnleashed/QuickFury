@@ -50,27 +50,22 @@ namespace QuickFury {
             );
 
             if (apply == null || getRenderers == null || getAutoWorldSize == null || plugComponentType == null) {
-                Debug.LogWarning("[QuickFury] Covered SPS mesh probe skip disabled: target signature mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    apply,
-                    prefix: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(End))
-                );
-                harmony.Patch(
-                    getRenderers,
-                    postfix: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(CaptureRenderers))
-                );
-                harmony.Patch(
-                    getAutoWorldSize,
-                    prefix: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(SkipCovered))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Covered SPS mesh probe skip disabled: " + e.Message);
-            }
+            harmony.Patch(
+                apply,
+                prefix: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(End))
+            );
+            harmony.Patch(
+                getRenderers,
+                postfix: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(CaptureRenderers))
+            );
+            harmony.Patch(
+                getAutoWorldSize,
+                prefix: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(SkipCovered))
+            );
         }
 
         private static void Begin(object mode) {

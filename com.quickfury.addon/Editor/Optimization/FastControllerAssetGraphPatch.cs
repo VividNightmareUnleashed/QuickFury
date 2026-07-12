@@ -20,7 +20,6 @@ namespace QuickFury {
     /// serialized property on every node.
     /// </summary>
     internal static class FastControllerAssetGraphPatch {
-        private static VrcfuryCompatibility compatibility;
         private static MethodInfo getUseOriginalClip;
         private static MethodInfo getClipExt;
         private static MethodInfo finalizeClip;
@@ -36,8 +35,6 @@ namespace QuickFury {
         internal static string LastStats { get; private set; } = "none";
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility targets) {
-            compatibility = targets;
-
             var sessionType = VrcfuryCompatibility.FindType("VF.Utils.SaveAssetsSession");
             var getUnsavedChildren = VrcfuryCompatibility.FindUniqueMethod(
                 sessionType,
@@ -114,30 +111,23 @@ namespace QuickFury {
                                            || curveIsFloat == null || curveFloatCurve == null
                                            || curveObjectCurve == null || rewriteInternals == null
                                            || saveAssetsRun == null || saveMethods.Length < 3) {
-                Debug.LogWarning(
-                    "[QuickFury] Fast controller asset graph disabled: expected VRCFury members were not found."
-                );
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
+            harmony.Patch(
+                getUnsavedChildren,
+                prefix: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(Prefix))
+            );
+            harmony.Patch(
+                saveAssetsRun,
+                prefix: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(BeginSaveRun)),
+                finalizer: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(EndSaveRun))
+            );
+            foreach (var method in saveMethods) {
                 harmony.Patch(
-                    getUnsavedChildren,
-                    prefix: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(Prefix))
+                    method,
+                    postfix: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(AssetSaved))
                 );
-                harmony.Patch(
-                    saveAssetsRun,
-                    prefix: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(BeginSaveRun)),
-                    finalizer: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(EndSaveRun))
-                );
-                foreach (var method in saveMethods) {
-                    harmony.Patch(
-                        method,
-                        postfix: new HarmonyMethod(typeof(FastControllerAssetGraphPatch), nameof(AssetSaved))
-                    );
-                }
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Fast controller asset graph disabled: " + e.Message);
             }
         }
 
@@ -186,9 +176,10 @@ namespace QuickFury {
             var seen = new HashSet<Object>();
             foreach (var property in material.GetTexturePropertyNames()) {
                 var texture = material.GetTexture(property);
-                if (texture == null || !seen.Add(texture) || !DidCreate(texture)) continue;
+                if (texture == null || !seen.Add(texture)
+                                    || !QuickFuryBootstrap.Compatibility.DidCreate(texture)) continue;
                 if (savedOrScheduled != null && savedOrScheduled.Contains(texture)) continue;
-                if (string.IsNullOrEmpty(AssetDatabase.GetAssetPath(texture))) output.Add(texture);
+                if (!PatchUtils.IsPersisted(texture)) output.Add(texture);
             }
             return output;
         }
@@ -235,7 +226,7 @@ namespace QuickFury {
             bool Include(Object current) {
                 if (current == controller) return true;
                 var timed = Timestamp();
-                var created = DidCreate(current);
+                var created = QuickFuryBootstrap.Compatibility.DidCreate(current);
                 didCreateTicks += Timestamp() - timed;
                 if (!created) return false;
 
@@ -248,7 +239,7 @@ namespace QuickFury {
                 // Outside a SaveAssets run retain VRCFury's normal persistence check.
                 // During a run, saved/scheduled objects are tracked in-memory and an
                 // adopted controller's existing subassets were loaded above in bulk.
-                if (known == null && !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(current))) {
+                if (known == null && PatchUtils.IsPersisted(current)) {
                     return true;
                 }
 
@@ -306,8 +297,9 @@ namespace QuickFury {
             // dependencies are enumerated precisely through AnimationUtility above.
             if (nativeDependencyRoots.Count > 0) {
                 var started = Timestamp();
+                // PushChildren runs once per visited behaviour, so the roots are unique.
                 foreach (var dependency in EditorUtility.CollectDependencies(
-                             nativeDependencyRoots.Distinct().ToArray()
+                             nativeDependencyRoots.ToArray()
                          )) {
                     if (dependency != null) nativeDependencies.Add(dependency);
                     if (dependency == null || !visited.Add(dependency)) continue;
@@ -354,14 +346,15 @@ namespace QuickFury {
             var measuredTicks = includeTicks + pushTicks + dependencyTicks + rewriteTicks + settingsTicks;
             if (detailed && measuredTicks > lastStatsTicks) {
                 lastStatsTicks = measuredTicks;
+                double Ms(long ticks) => ProfilePatches.ToMilliseconds(ticks);
                 LastStats = $"visited={visited.Count},output={output.Count},nativeRoots={nativeDependencyRoots.Count}," +
-                            $"includeMs={ToMilliseconds(includeTicks):F1},pushMs={ToMilliseconds(pushTicks):F1}," +
-                            $"depsMs={ToMilliseconds(dependencyTicks):F1},rewriteMs={ToMilliseconds(rewriteTicks):F1}," +
-                            $"settingsMs={ToMilliseconds(settingsTicks):F1},clips={clipCount}," +
-                            $"didCreateMs={ToMilliseconds(didCreateTicks):F1}," +
-                            $"originalClipMs={ToMilliseconds(originalClipTicks):F1}," +
-                            $"finalizeClipMs={ToMilliseconds(finalizeClipTicks):F1}," +
-                            $"dedupKeyMs={ToMilliseconds(deduplicateClipTicks):F1}," +
+                            $"includeMs={Ms(includeTicks):F1},pushMs={Ms(pushTicks):F1}," +
+                            $"depsMs={Ms(dependencyTicks):F1},rewriteMs={Ms(rewriteTicks):F1}," +
+                            $"settingsMs={Ms(settingsTicks):F1},clips={clipCount}," +
+                            $"didCreateMs={Ms(didCreateTicks):F1}," +
+                            $"originalClipMs={Ms(originalClipTicks):F1}," +
+                            $"finalizeClipMs={Ms(finalizeClipTicks):F1}," +
+                            $"dedupKeyMs={Ms(deduplicateClipTicks):F1}," +
                             $"deduplicated={deduplicatedClips}," +
                             $"replacements={clipReplacements.Count}";
             }
@@ -493,10 +486,6 @@ namespace QuickFury {
                 .Append(Float(bounds.extents.x)).Append(',')
                 .Append(Float(bounds.extents.y)).Append(',')
                 .Append(Float(bounds.extents.z)).AppendLine();
-        }
-
-        private static double ToMilliseconds(long ticks) {
-            return ProfilePatches.ToMilliseconds(ticks);
         }
 
         private static void PushChildren(
@@ -660,10 +649,6 @@ namespace QuickFury {
                 return replacement as Motion;
             }
             return motion;
-        }
-
-        private static bool DidCreate(Object obj) {
-            return compatibility.DidCreate(obj);
         }
     }
 }

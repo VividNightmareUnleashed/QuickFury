@@ -11,6 +11,7 @@ namespace QuickFury {
         private static readonly Harmony Harmony = new Harmony(HarmonyId);
         private static VrcfuryCompatibility compatibility;
 
+        internal static VrcfuryCompatibility Compatibility => compatibility;
         internal static bool ProfilingAvailable => compatibility != null;
         internal static bool OptimizationCompatible => compatibility?.OptimizationCompatible == true;
 
@@ -62,8 +63,9 @@ namespace QuickFury {
             );
         }
 
-        // A patch whose reflection throws (rather than reporting a mismatch) must not
-        // prevent the remaining patches from installing.
+        // Single owner of the disable policy: a patch reports a missing/renamed VRCFury
+        // member by throwing (typically "target signature mismatch"), and a failure in
+        // one Install must not prevent the remaining patches from installing.
         private static void Install(string name, Action<Harmony, VrcfuryCompatibility> install) {
             try {
                 install(Harmony, compatibility);

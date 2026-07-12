@@ -56,24 +56,19 @@ namespace QuickFury {
             );
 
             if (apply == null || getBindings == null) {
-                Debug.LogWarning("[QuickFury] Blendshape binding cache disabled: target signature mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    apply,
-                    prefix: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(End))
-                );
-                harmony.Patch(
-                    getBindings,
-                    prefix: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(GetCached)),
-                    postfix: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(Store))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Blendshape binding cache disabled: " + e.Message);
-            }
+            harmony.Patch(
+                apply,
+                prefix: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(End))
+            );
+            harmony.Patch(
+                getBindings,
+                prefix: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(GetCached)),
+                postfix: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(Store))
+            );
         }
 
         private static void Begin() {

@@ -32,38 +32,28 @@ namespace QuickFury {
         // SaveAssetsService.Run does not re-enter, so one active session is enough.
         [ThreadStatic] private static ScanSession scanSession;
 
-        private static VrcfuryCompatibility compatibility;
         private static MethodInfo saveAssetAndChildren;
         private static FieldInfo createdAssets;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility targets) {
-            compatibility = targets;
             var run = targets.SaveAssetsRun;
 
             var sessionType = VrcfuryCompatibility.FindType("VF.Utils.SaveAssetsSession");
-            var saveComponent = VrcfuryCompatibility.FindUniqueMethod(
+            var saveComponent = VrcfuryCompatibility.FindMethodWithSignature(
                 sessionType,
                 "SaveUnsavedComponentAssets",
-                method => {
-                    var parameters = method.GetParameters();
-                    return method.ReturnType == typeof(void)
-                           && parameters.Length == 2
-                           && parameters[0].ParameterType == typeof(Component)
-                           && parameters[1].ParameterType == typeof(string);
-                }
+                typeof(void),
+                typeof(Component),
+                typeof(string)
             );
-            saveAssetAndChildren = VrcfuryCompatibility.FindUniqueMethod(
+            saveAssetAndChildren = VrcfuryCompatibility.FindMethodWithSignature(
                 sessionType,
                 "SaveAssetAndChildren",
-                method => {
-                    var parameters = method.GetParameters();
-                    return method.ReturnType == typeof(void)
-                           && parameters.Length == 4
-                           && parameters[0].ParameterType == typeof(Object)
-                           && parameters[1].ParameterType == typeof(string)
-                           && parameters[2].ParameterType == typeof(string)
-                           && parameters[3].ParameterType == typeof(bool);
-                }
+                typeof(void),
+                typeof(Object),
+                typeof(string),
+                typeof(string),
+                typeof(bool)
             );
 
             var factoryType = VrcfuryCompatibility.FindType("VF.Utils.VrcfObjectFactory");
@@ -71,25 +61,18 @@ namespace QuickFury {
 
             if (run == null || saveComponent == null || saveAssetAndChildren == null
                             || createdAssets == null || targets.FactoryDidCreate == null) {
-                Debug.LogWarning(
-                    "[QuickFury] Fast SaveAssets discovery disabled: expected VRCFury members were not found."
-                );
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    run,
-                    prefix: new HarmonyMethod(typeof(SaveAssetsDuplicateScanPatch), nameof(RunPrefix)),
-                    finalizer: new HarmonyMethod(typeof(SaveAssetsDuplicateScanPatch), nameof(RunFinalizer))
-                );
-                harmony.Patch(
-                    saveComponent,
-                    prefix: new HarmonyMethod(typeof(SaveAssetsDuplicateScanPatch), nameof(SaveComponentPrefix))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Fast SaveAssets discovery disabled: " + e.Message);
-            }
+            harmony.Patch(
+                run,
+                prefix: new HarmonyMethod(typeof(SaveAssetsDuplicateScanPatch), nameof(RunPrefix)),
+                finalizer: new HarmonyMethod(typeof(SaveAssetsDuplicateScanPatch), nameof(RunFinalizer))
+            );
+            harmony.Patch(
+                saveComponent,
+                prefix: new HarmonyMethod(typeof(SaveAssetsDuplicateScanPatch), nameof(SaveComponentPrefix))
+            );
         }
 
         private static void RunPrefix(out bool __state) {
@@ -173,7 +156,7 @@ namespace QuickFury {
             foreach (var item in created) {
                 if (!(item is Object asset) || asset == null) continue;
                 if (!CanBeStandaloneRoot(asset)) continue;
-                if (!string.IsNullOrEmpty(AssetDatabase.GetAssetPath(asset))) continue;
+                if (PatchUtils.IsPersisted(asset)) continue;
                 candidates.Add(asset);
             }
 
@@ -181,7 +164,7 @@ namespace QuickFury {
                          .OrderBy(candidate => candidate.GetType().FullName, StringComparer.Ordinal)
                          .ThenBy(candidate => candidate.name, StringComparer.Ordinal)
                          .ThenBy(candidate => candidate.GetInstanceID())) {
-                if (asset == null || !string.IsNullOrEmpty(AssetDatabase.GetAssetPath(asset))) continue;
+                if (asset == null || PatchUtils.IsPersisted(asset)) continue;
 
                 var filename = GetFilename(asset);
                 VrcfuryCompatibility.InvokeUnwrapped(
@@ -189,7 +172,7 @@ namespace QuickFury {
                     saveSession,
                     new object[] { asset, filename, tmpDir, true }
                 );
-                if (!string.IsNullOrEmpty(AssetDatabase.GetAssetPath(asset))) {
+                if (PatchUtils.IsPersisted(asset)) {
                     session.SavedStandaloneRoots++;
                 }
             }
@@ -203,9 +186,9 @@ namespace QuickFury {
         ) {
             foreach (var asset in EditorUtility.CollectDependencies(new Object[] { renderer })
                          .Where(asset => asset is Material || asset is Mesh)
-                         .Where(asset => asset != null && DidCreate(asset))
+                         .Where(asset => asset != null && QuickFuryBootstrap.Compatibility.DidCreate(asset))
                          .Distinct()) {
-                if (!string.IsNullOrEmpty(AssetDatabase.GetAssetPath(asset))) continue;
+                if (PatchUtils.IsPersisted(asset)) continue;
                 VrcfuryCompatibility.InvokeUnwrapped(
                     saveAssetAndChildren,
                     saveSession,
@@ -238,10 +221,6 @@ namespace QuickFury {
             if (asset.GetType().Name == "VRCExpressionsMenu") return "VRCFury Menu";
             if (asset.GetType().Name == "VRCExpressionParameters") return "VRCFury Params";
             return "VRCFury " + (string.IsNullOrWhiteSpace(asset.name) ? asset.GetType().Name : asset.name);
-        }
-
-        private static bool DidCreate(Object asset) {
-            return compatibility.DidCreate(asset);
         }
     }
 }

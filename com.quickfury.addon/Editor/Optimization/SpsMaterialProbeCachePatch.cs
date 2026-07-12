@@ -21,33 +21,27 @@ namespace QuickFury {
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility compatibility) {
             var type = VrcfuryCompatibility.FindType("VF.Builder.Haptics.TpsConfigurer");
-            var target = VrcfuryCompatibility.FindUniqueMethod(
+            var target = VrcfuryCompatibility.FindMethodWithSignature(
                 type,
                 "HasDpsOrTpsMaterial",
-                method => method.ReturnType == typeof(bool)
-                          && method.GetParameters().Length == 1
-                          && method.GetParameters()[0].ParameterType == typeof(Renderer)
+                typeof(bool),
+                typeof(Renderer)
             );
             if (target == null) {
-                Debug.LogWarning("[QuickFury] SPS material probe cache disabled: target signature mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    target,
-                    prefix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(GetCached)),
-                    postfix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(Store))
-                );
-                // The signature is only self-invalidating while the dependency hashes are
-                // current; a shader or material edit between two bakes must be observed.
-                harmony.Patch(
-                    compatibility.RunMain,
-                    prefix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(InvalidateDependencyHashes))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] SPS material probe cache disabled: " + e.Message);
-            }
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(GetCached)),
+                postfix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(Store))
+            );
+            // The signature is only self-invalidating while the dependency hashes are
+            // current; a shader or material edit between two bakes must be observed.
+            harmony.Patch(
+                compatibility.RunMain,
+                prefix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(InvalidateDependencyHashes))
+            );
         }
 
         private static void InvalidateDependencyHashes() {

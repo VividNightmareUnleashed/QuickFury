@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
-using UnityEngine;
 
 namespace QuickFury {
     /// <summary>
@@ -47,40 +46,34 @@ namespace QuickFury {
 
             if (apply == null || containerGetter == null || behaviourGetter == null
                               || trackingControlType == null || stateMachineField == null) {
-                Debug.LogWarning("[QuickFury] Tracking behaviour index disabled: target signature mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
             // Optional: without an empty set the graph cache still works, the discovery
             // shortcut is simply never taken.
             emptyContainerSet = VrcfuryCompatibility.CreateEmptyImmutableSet(containerGetter.ReturnType);
 
-            try {
-                harmony.Patch(
-                    apply,
-                    prefix: new HarmonyMethod(typeof(TrackingBehaviourIndexPatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(TrackingBehaviourIndexPatch), nameof(End))
-                );
-                // object-typed __result instead of a MakeGenericMethod-closed prefix:
-                // Harmony's shared state stores patch methods by metadata token, which
-                // cannot encode generic arguments, so a closed generic patch breaks any
-                // later Patch/UnpatchAll that re-reads this method's patch list.
-                harmony.Patch(
-                    containerGetter,
-                    prefix: new HarmonyMethod(typeof(TrackingBehaviourIndexPatch), nameof(GetCachedContainers)),
-                    postfix: new HarmonyMethod(typeof(TrackingBehaviourIndexPatch), nameof(StoreContainers))
-                );
-                harmony.Patch(
-                    behaviourGetter,
-                    postfix: new HarmonyMethod(
-                        typeof(TrackingBehaviourIndexPatch),
-                        nameof(RecordBehaviourTypes)
-                    )
-                );
-            } catch (Exception e) {
-                active = null;
-                Debug.LogWarning("[QuickFury] Tracking behaviour index disabled: " + e.Message);
-            }
+            harmony.Patch(
+                apply,
+                prefix: new HarmonyMethod(typeof(TrackingBehaviourIndexPatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(TrackingBehaviourIndexPatch), nameof(End))
+            );
+            // object-typed __result instead of a MakeGenericMethod-closed prefix:
+            // Harmony's shared state stores patch methods by metadata token, which
+            // cannot encode generic arguments, so a closed generic patch breaks any
+            // later Patch/UnpatchAll that re-reads this method's patch list.
+            harmony.Patch(
+                containerGetter,
+                prefix: new HarmonyMethod(typeof(TrackingBehaviourIndexPatch), nameof(GetCachedContainers)),
+                postfix: new HarmonyMethod(typeof(TrackingBehaviourIndexPatch), nameof(StoreContainers))
+            );
+            harmony.Patch(
+                behaviourGetter,
+                postfix: new HarmonyMethod(
+                    typeof(TrackingBehaviourIndexPatch),
+                    nameof(RecordBehaviourTypes)
+                )
+            );
         }
 
         private static void Begin() {

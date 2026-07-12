@@ -56,28 +56,23 @@ namespace QuickFury {
                 || ArmatureReflection.GetConstraintsMethod == null || constraintType == null
                 || createConstraint == null || getAffectedObject == null
                 || getConstraintComponent == null) {
-                Debug.LogWarning("[QuickFury] Armature constraint index disabled: target signature mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    ArmatureReflection.ArmatureLinkApply,
-                    prefix: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(End))
-                );
-                harmony.Patch(
-                    ArmatureReflection.HapticSocketsApply,
-                    prefix: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(BeginHaptics)),
-                    finalizer: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(End))
-                );
-                harmony.Patch(
-                    ArmatureReflection.GetConstraintsMethod,
-                    prefix: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(GetConstraints))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Armature constraint index disabled: " + e.Message);
-            }
+            harmony.Patch(
+                ArmatureReflection.ArmatureLinkApply,
+                prefix: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(End))
+            );
+            harmony.Patch(
+                ArmatureReflection.HapticSocketsApply,
+                prefix: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(BeginHaptics)),
+                finalizer: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(End))
+            );
+            harmony.Patch(
+                ArmatureReflection.GetConstraintsMethod,
+                prefix: new HarmonyMethod(typeof(ArmatureConstraintIndexPatch), nameof(GetConstraints))
+            );
         }
 
         private static void Begin(object __instance) {
@@ -116,12 +111,7 @@ namespace QuickFury {
                         Affected = affected
                     };
                     context.Entries.Add(entry);
-                    var id = affected.GetInstanceID();
-                    if (!context.ByAffectedTransform.TryGetValue(id, out var bucket)) {
-                        bucket = new List<Entry>();
-                        context.ByAffectedTransform.Add(id, bucket);
-                    }
-                    bucket.Add(entry);
+                    context.ByAffectedTransform.GetOrAddList(affected.GetInstanceID()).Add(entry);
                 }
                 active = context;
             } catch (Exception e) {

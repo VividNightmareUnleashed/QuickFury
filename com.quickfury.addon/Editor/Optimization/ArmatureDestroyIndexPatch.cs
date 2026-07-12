@@ -58,33 +58,28 @@ namespace QuickFury {
                 || getUploadRoots == null || destroyConstraint == null
                 || categoryTargets.Any(target => target == null)) {
                 categoryTargets = null;
-                Debug.LogWarning("[QuickFury] Armature destroy index disabled: target signature mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    ArmatureReflection.ArmatureLinkApply,
-                    prefix: new HarmonyMethod(typeof(ArmatureDestroyIndexPatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(ArmatureDestroyIndexPatch), nameof(End))
-                );
-                harmony.Patch(
-                    destroy,
-                    prefix: new HarmonyMethod(typeof(ArmatureDestroyIndexPatch), nameof(Destroy))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Armature destroy index disabled: " + e.Message);
-            }
+            harmony.Patch(
+                ArmatureReflection.ArmatureLinkApply,
+                prefix: new HarmonyMethod(typeof(ArmatureDestroyIndexPatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(ArmatureDestroyIndexPatch), nameof(End))
+            );
+            harmony.Patch(
+                destroy,
+                prefix: new HarmonyMethod(typeof(ArmatureDestroyIndexPatch), nameof(Destroy))
+            );
         }
 
         private static CategoryTarget CreateCategoryTarget(string typeName) {
             var componentType = VrcfuryCompatibility.FindType(typeName);
             if (componentType == null || !typeof(Component).IsAssignableFrom(componentType)) return null;
 
-            var root = VrcfuryCompatibility.FindUniqueMethod(
+            var root = VrcfuryCompatibility.FindMethodWithSignature(
                 componentType,
                 "GetRootTransform",
-                method => method.ReturnType == typeof(Transform) && method.GetParameters().Length == 0
+                typeof(Transform)
             );
             if (root == null) return null;
 
@@ -200,12 +195,7 @@ namespace QuickFury {
                             null
                         ) as Transform;
                         if (root == null) continue;
-                        var id = root.GetInstanceID();
-                        if (!byComponentRoot.TryGetValue(id, out var bucket)) {
-                            bucket = new List<IndexedComponent>();
-                            byComponentRoot.Add(id, bucket);
-                        }
-                        bucket.Add(new IndexedComponent {
+                        byComponentRoot.GetOrAddList(root.GetInstanceID()).Add(new IndexedComponent {
                             Order = order++,
                             Component = component,
                             UploadRoot = uploadRoot

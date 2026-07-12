@@ -29,7 +29,10 @@ namespace QuickFury {
             );
             var physboneBaseType = VrcfuryCompatibility.FindType("VRC.Dynamics.VRCPhysBoneBase");
 
-            ignoreTransformsField = ArmatureReflection.FindFieldInHierarchy(physboneBaseType, "ignoreTransforms");
+            ignoreTransformsField = physboneBaseType?.GetField(
+                "ignoreTransforms",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+            );
             getRootTransform = physboneBaseType?.GetMethod(
                 "GetRootTransform",
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
@@ -41,28 +44,23 @@ namespace QuickFury {
             if (!ArmatureReflection.ArmatureLinkAvailable || !ArmatureReflection.HapticSocketsAvailable
                 || ArmatureReflection.RemoveFromPhysbones == null || physboneType == null
                 || ignoreTransformsField == null || getRootTransform == null) {
-                Debug.LogWarning("[QuickFury] Armature PhysBone index disabled: target signature mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    ArmatureReflection.ArmatureLinkApply,
-                    prefix: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(End))
-                );
-                harmony.Patch(
-                    ArmatureReflection.HapticSocketsApply,
-                    prefix: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(BeginHaptics)),
-                    finalizer: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(End))
-                );
-                harmony.Patch(
-                    ArmatureReflection.RemoveFromPhysbones,
-                    prefix: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(RemoveFromPhysbones))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Armature PhysBone index disabled: " + e.Message);
-            }
+            harmony.Patch(
+                ArmatureReflection.ArmatureLinkApply,
+                prefix: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(End))
+            );
+            harmony.Patch(
+                ArmatureReflection.HapticSocketsApply,
+                prefix: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(BeginHaptics)),
+                finalizer: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(End))
+            );
+            harmony.Patch(
+                ArmatureReflection.RemoveFromPhysbones,
+                prefix: new HarmonyMethod(typeof(ArmaturePhysboneIndexPatch), nameof(RemoveFromPhysbones))
+            );
         }
 
         private static void Begin(object __instance) {
@@ -85,12 +83,7 @@ namespace QuickFury {
                     if (component == null) continue;
                     var root = getRootTransform.Invoke(component, null) as Transform;
                     if (root == null) continue;
-                    var id = root.GetInstanceID();
-                    if (!context.ByRoot.TryGetValue(id, out var bucket)) {
-                        bucket = new List<Component>();
-                        context.ByRoot.Add(id, bucket);
-                    }
-                    bucket.Add(component);
+                    context.ByRoot.GetOrAddList(root.GetInstanceID()).Add(component);
                 }
                 active = context;
             } catch (Exception e) {

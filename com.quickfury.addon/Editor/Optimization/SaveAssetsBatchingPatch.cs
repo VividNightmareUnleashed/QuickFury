@@ -1,6 +1,5 @@
 using System;
 using HarmonyLib;
-using UnityEngine;
 
 namespace QuickFury {
     /// <summary>
@@ -29,28 +28,21 @@ namespace QuickFury {
             );
 
             if (run == null || withoutAssetEditing == null) {
-                Debug.LogWarning(
-                    "[QuickFury] SaveAssets batching optimization disabled: expected VRCFury methods were not found."
-                );
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    run,
-                    prefix: new HarmonyMethod(typeof(SaveAssetsBatchingPatch), nameof(RunPrefix)),
-                    finalizer: new HarmonyMethod(typeof(SaveAssetsBatchingPatch), nameof(RunFinalizer))
-                );
-                harmony.Patch(
-                    withoutAssetEditing,
-                    prefix: new HarmonyMethod(
-                        typeof(SaveAssetsBatchingPatch),
-                        nameof(WithoutAssetEditingPrefix)
-                    )
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] SaveAssets batching optimization disabled: " + e.Message);
-            }
+            harmony.Patch(
+                run,
+                prefix: new HarmonyMethod(typeof(SaveAssetsBatchingPatch), nameof(RunPrefix)),
+                finalizer: new HarmonyMethod(typeof(SaveAssetsBatchingPatch), nameof(RunFinalizer))
+            );
+            harmony.Patch(
+                withoutAssetEditing,
+                prefix: new HarmonyMethod(
+                    typeof(SaveAssetsBatchingPatch),
+                    nameof(WithoutAssetEditingPrefix)
+                )
+            );
         }
 
         private static void RunPrefix(out bool __state) {

@@ -13,11 +13,7 @@ namespace QuickFury {
         [ThreadStatic] private static object activeService;
         [ThreadStatic] private static OrderedPathResolver activeResolver;
 
-        private static VrcfuryCompatibility compatibility;
-
         internal static void Install(Harmony harmony, VrcfuryCompatibility targets) {
-            compatibility = targets;
-
             harmony.Patch(
                 targets.ApplyDeferred,
                 prefix: new HarmonyMethod(typeof(OrderedPathRewritePatch), nameof(BeginDeferredRewrite)),
@@ -71,9 +67,10 @@ namespace QuickFury {
 
         private static List<(string from, string to)> ReadMoves(object service) {
             var output = new List<(string from, string to)>();
-            if (service == null || compatibility?.DeferredMoves == null) return output;
+            var deferredMoves = QuickFuryBootstrap.Compatibility?.DeferredMoves;
+            if (service == null || deferredMoves == null) return output;
 
-            var raw = compatibility.DeferredMoves.GetValue(service) as IEnumerable;
+            var raw = deferredMoves.GetValue(service) as IEnumerable;
             if (raw == null) return output;
 
             foreach (var item in raw) {

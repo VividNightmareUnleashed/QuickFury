@@ -21,11 +21,8 @@ namespace QuickFury {
         }
 
         [ThreadStatic] private static Context active;
-        private static VrcfuryCompatibility compatibility;
 
         internal static void Install(Harmony harmony, VrcfuryCompatibility targets) {
-            compatibility = targets;
-
             var moveType = VrcfuryCompatibility.FindType("VF.Service.ObjectMoveService");
             var move = VrcfuryCompatibility.FindUniqueMethod(
                 moveType,
@@ -35,23 +32,18 @@ namespace QuickFury {
 
             if (!ArmatureReflection.ArmatureLinkAvailable || move == null
                 || ArmatureReflection.RemoveFromPhysbones == null || targets.DeferredMoves == null) {
-                Debug.LogWarning("[QuickFury] Fast Armature Link moves disabled: target mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
-            try {
-                harmony.Patch(
-                    ArmatureReflection.ArmatureLinkApply,
-                    prefix: new HarmonyMethod(typeof(FastArmatureMovePatch), nameof(Begin)),
-                    finalizer: new HarmonyMethod(typeof(FastArmatureMovePatch), nameof(End))
-                );
-                harmony.Patch(
-                    move,
-                    prefix: new HarmonyMethod(typeof(FastArmatureMovePatch), nameof(Move))
-                );
-            } catch (Exception e) {
-                Debug.LogWarning("[QuickFury] Fast Armature Link moves disabled: " + e.Message);
-            }
+            harmony.Patch(
+                ArmatureReflection.ArmatureLinkApply,
+                prefix: new HarmonyMethod(typeof(FastArmatureMovePatch), nameof(Begin)),
+                finalizer: new HarmonyMethod(typeof(FastArmatureMovePatch), nameof(End))
+            );
+            harmony.Patch(
+                move,
+                prefix: new HarmonyMethod(typeof(FastArmatureMovePatch), nameof(Move))
+            );
         }
 
         private static void Begin(object __instance) {
@@ -160,7 +152,7 @@ namespace QuickFury {
         // avoid a reflection field read on every one of the thousands of moves.
         private static IList GetDeferred(Context context, object service) {
             if (!ReferenceEquals(context.DeferredService, service)) {
-                context.Deferred = compatibility.DeferredMoves.GetValue(service) as IList;
+                context.Deferred = QuickFuryBootstrap.Compatibility.DeferredMoves.GetValue(service) as IList;
                 context.DeferredService = service;
             }
             return context.Deferred;

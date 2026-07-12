@@ -71,19 +71,6 @@ namespace QuickFury {
             );
         }
 
-        internal static FieldInfo FindFieldInHierarchy(Type type, string name) {
-            while (type != null) {
-                var field = type.GetField(
-                    name,
-                    BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public |
-                    BindingFlags.NonPublic | BindingFlags.DeclaredOnly
-                );
-                if (field != null) return field;
-                type = type.BaseType;
-            }
-            return null;
-        }
-
         internal static GameObject GetGameObject(object vfGameObject) {
             if (vfGameObject == null || gameObjectField == null) return null;
             return gameObjectField.GetValue(vfGameObject) as GameObject;

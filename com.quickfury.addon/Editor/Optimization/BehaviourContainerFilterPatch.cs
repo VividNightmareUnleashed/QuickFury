@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using UnityEditor.Animations;
@@ -40,8 +39,7 @@ namespace QuickFury {
                 : VrcfuryCompatibility.CreateEmptyImmutableSet(containerGetter.ReturnType);
 
             if (containerGetter == null || stateMachineField == null || emptyContainers == null) {
-                Debug.LogWarning("[QuickFury] Behaviour container filter disabled: target signature mismatch.");
-                return;
+                throw new InvalidOperationException("target signature mismatch");
             }
 
             playableLayerControlType = VrcfuryCompatibility.FindType(
@@ -70,41 +68,35 @@ namespace QuickFury {
             if (playableLayerControlType == null || parameterDriverType == null || animatorLayerControlType == null
                                               || actionApply == null || syncedDriverApply == null
                                               || layerControlFix == null) {
-                Debug.LogWarning("[QuickFury] Behaviour container filter disabled: service target mismatch.");
-                return;
+                throw new InvalidOperationException("service target signature mismatch");
             }
 
-            try {
-                // The filter owns its own prefix on the getter so it works even when the
-                // tracking behaviour index (which patches the same getter) is unavailable.
-                // At most one of the two contexts is ever active: they cover different
-                // build phases. The prefix uses an object-typed __result — a closed
-                // generic patch method would not survive Harmony's token-based shared
-                // state when the getter's patch list is re-read.
-                harmony.Patch(
-                    containerGetter,
-                    prefix: new HarmonyMethod(typeof(BehaviourContainerFilterPatch), nameof(Filter))
-                );
+            // The filter owns its own prefix on the getter so it works even when the
+            // tracking behaviour index (which patches the same getter) is unavailable.
+            // At most one of the two contexts is ever active: they cover different
+            // build phases. The prefix uses an object-typed __result — a closed
+            // generic patch method would not survive Harmony's token-based shared
+            // state when the getter's patch list is re-read.
+            harmony.Patch(
+                containerGetter,
+                prefix: new HarmonyMethod(typeof(BehaviourContainerFilterPatch), nameof(Filter))
+            );
 
-                PatchPhase(
-                    harmony,
-                    actionApply,
-                    nameof(BeginPlayableLayerControls)
-                );
-                PatchPhase(
-                    harmony,
-                    syncedDriverApply,
-                    nameof(BeginParameterDrivers)
-                );
-                PatchPhase(
-                    harmony,
-                    layerControlFix,
-                    nameof(BeginAnimatorLayerControls)
-                );
-            } catch (Exception e) {
-                active = null;
-                Debug.LogWarning("[QuickFury] Behaviour container filter disabled: " + e.Message);
-            }
+            PatchPhase(
+                harmony,
+                actionApply,
+                nameof(BeginPlayableLayerControls)
+            );
+            PatchPhase(
+                harmony,
+                syncedDriverApply,
+                nameof(BeginParameterDrivers)
+            );
+            PatchPhase(
+                harmony,
+                layerControlFix,
+                nameof(BeginAnimatorLayerControls)
+            );
         }
 
         private static void PatchPhase(
@@ -183,22 +175,24 @@ namespace QuickFury {
         ) {
             if (stateMachine == null || !visited.Add(stateMachine.GetInstanceID())) return false;
 
-            var stateMachineBehaviours = stateMachine.behaviours;
-            if (stateMachineBehaviours != null
-                && stateMachineBehaviours.Any(value => value != null && target.IsInstanceOfType(value))) {
-                return true;
-            }
+            if (ContainsInstanceOf(stateMachine.behaviours, target)) return true;
 
             foreach (var childState in stateMachine.states) {
-                var behaviours = childState.state?.behaviours;
-                if (behaviours != null
-                    && behaviours.Any(value => value != null && target.IsInstanceOfType(value))) {
-                    return true;
-                }
+                if (ContainsInstanceOf(childState.state?.behaviours, target)) return true;
             }
 
             foreach (var childStateMachine in stateMachine.stateMachines) {
                 if (HasTarget(childStateMachine.stateMachine, target, visited)) return true;
+            }
+            return false;
+        }
+
+        // Plain loop instead of Enumerable.Any: this runs for every state on every
+        // uncached layer scan, and the captured-lambda closure allocations add up.
+        private static bool ContainsInstanceOf(StateMachineBehaviour[] behaviours, Type target) {
+            if (behaviours == null) return false;
+            foreach (var behaviour in behaviours) {
+                if (behaviour != null && target.IsInstanceOfType(behaviour)) return true;
             }
             return false;
         }
