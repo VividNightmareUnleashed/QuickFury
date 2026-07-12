@@ -9,7 +9,7 @@
     "name": "Vivid Nightmare"
   },
   "vpmDependencies": {
-    "com.vrcfury.vrcfury": ">=1.1348.0",
+    "com.vrcfury.vrcfury": ">=1.1363.0",
     "com.vrchat.avatars": ">=3.10.3"
   }
 }

@@ -8,7 +8,7 @@ using Object = UnityEngine.Object;
 
 namespace QuickFury {
     internal sealed class VrcfuryCompatibility {
-        internal const string OptimizedVersion = "1.1348.0";
+        internal const string OptimizedVersion = "1.1363.0";
 
         internal string PackageVersion { get; private set; }
         internal Guid ModuleVersionId { get; private set; }

@@ -37,15 +37,19 @@ namespace QuickFury {
                 method => method.ReturnType == typeof(AnimatorControllerParameter)
                           && method.GetParameters().Length == 3
             );
+            // SetDefault mutates the parameter instance returned by GetParam. Stock
+            // VRCFury gets a fresh marshalled copy there, so the write never reaches the
+            // controller; invalidating drops the indexed instance so later lookups match.
             var mutators = type?
                 .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .Where(method => new[] {
                     "TakeOwnershipOf", "RemoveParameter", "RemoveInvalidParameters",
-                    "RewriteParameters", "UpgradeWrongParamTypes", "set_parameters"
+                    "RewriteParameters", "UpgradeWrongParamTypes", "set_parameters",
+                    "SetDefault"
                 }.Contains(method.Name))
                 .ToArray() ?? Array.Empty<MethodInfo>();
 
-            if (controllerField == null || getParam == null || newParam == null || mutators.Length < 6) {
+            if (controllerField == null || getParam == null || newParam == null || mutators.Length < 8) {
                 throw new InvalidOperationException("target signature mismatch");
             }
 
