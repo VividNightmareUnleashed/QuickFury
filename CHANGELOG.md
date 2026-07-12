@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.2.3 — 2026-07-12
+
+Move the compatibility target to VRCFury 1.1363.0 and fix a save-phase failure in bakes
+that create a fresh build folder.
+
+- Support VRCFury 1.1363.0: the exact-version gate, the VPM dependency floor, and the
+  controller parameter index follow the new release. The new `VFController.SetDefault`
+  invalidates the parameter index like the other mutators, so its write-back stays
+  discarded exactly as stock Unity marshalling discards it. All other patched members
+  were verified unchanged between 1.1348.0 and 1.1363.0.
+- Fix the retained SaveAssets batching swallowing VRCFury's deliberate asset-database
+  flush and deferring build-folder creation, which failed the first `CreateAsset` of a
+  bake into a fresh build folder ("Parent directory must exist"). Play-mode bakes
+  pre-created the folder and masked this; "Build an Editor Test Copy" bakes failed.
+  Nested `WithoutAssetEditing` calls now genuinely pause the batch and folder creation
+  briefly exits it, while per-asset imports stay batched.
+
 ## 1.2.2 — 2026-07-12
 
 Bound the SPS material probe cache's persistence and consolidate the patch install policy,

@@ -82,7 +82,7 @@ to this project instead. QuickFury is provided without warranty; use it at your 
 - Unity 2022.3
 - VRChat Avatars SDK 3.10.3 or newer
 - VRCFury installed separately
-- Behavior-changing optimizations: **VRCFury 1.1348.0 exactly**
+- Behavior-changing optimizations: **VRCFury 1.1363.0 exactly**
 
 QuickFury resolves VRCFury's internal Editor methods at load time. Profiling remains available
 when its signatures match, but all behavior-changing patches fail closed on unknown VRCFury
@@ -90,7 +90,7 @@ versions or unexpected method signatures.
 
 ## Install
 
-Install VRCFury normally first. Then either import the `QuickFury-1.2.2.unitypackage` from the
+Install VRCFury normally first. Then either import the `QuickFury-1.2.3.unitypackage` from the
 release, or add `com.quickfury.addon/package.json` through Unity's Package Manager. A local
 manifest entry looks like this:
 
@@ -101,7 +101,7 @@ manifest entry looks like this:
 After compilation, the Console should report:
 
 ```text
-[QuickFury] Ready for VRCFury 1.1348.0 (...).
+[QuickFury] Ready for VRCFury 1.1363.0 (...).
 ```
 
 Controls and profiling reports are under **Tools > QuickFury**. Removing the QuickFury package
