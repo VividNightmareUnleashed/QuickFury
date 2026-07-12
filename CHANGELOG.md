@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Store all persisted SPS material probe results in a single LRU-trimmed EditorPrefs entry
+  (512 signatures) instead of one permanent registry value per signature, and purge the
+  unbounded per-key v1 generation once on Windows. Probe signatures and the live-probe
+  fallback are unchanged; results are now flushed once per bake rather than per probe.
+
 ## 1.2.1 — 2026-07-11
 
 Simplify the 1.2 Editor implementation without changing its public behavior or compatibility
