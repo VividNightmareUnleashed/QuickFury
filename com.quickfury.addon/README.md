@@ -2,7 +2,7 @@
 
 QuickFury is an Editor-only, bolt-on performance layer for an existing VRCFury installation. It profiles VRCFury's bake and can replace a few measured hot paths with indexed implementations. It does not ship, fork, or modify VRCFury.
 
-QuickFury 1.2.1 is tested against VRCFury 1.1348.0. Its initial rewrite benchmark reduced a warm VRCFury bake from 98.54 seconds to 23.81 seconds. Version 1.2 reached a best clean measurement of 13.996 seconds, 56.2% below a 31.947-second same-session control. Read [PERFORMANCE.md](PERFORMANCE.md) for the measurements and validation boundary.
+QuickFury 1.2.2 is tested against VRCFury 1.1348.0. Its initial rewrite benchmark reduced a warm VRCFury bake from 98.54 seconds to 23.81 seconds. Version 1.2 reached a best clean measurement of 13.996 seconds, 56.2% below a 31.947-second same-session control. Read [PERFORMANCE.md](PERFORMANCE.md) for the measurements and validation boundary.
 
 ## Requirements and compatibility
 

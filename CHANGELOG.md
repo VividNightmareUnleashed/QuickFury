@@ -1,11 +1,21 @@
 # Changelog
 
-## Unreleased
+## 1.2.2 — 2026-07-12
+
+Bound the SPS material probe cache's persistence and consolidate the patch install policy,
+without changing optimization behavior or the compatibility boundary.
 
 - Store all persisted SPS material probe results in a single LRU-trimmed EditorPrefs entry
   (512 signatures) instead of one permanent registry value per signature, and purge the
   unbounded per-key v1 generation once on Windows. Probe signatures and the live-probe
   fallback are unchanged; results are now flushed once per bake rather than per probe.
+- Centralize the disable-and-continue install policy in the bootstrap: patches report a
+  missing VRCFury member by throwing, and one canonical warning marks each disabled
+  optimization. Shared signature-based method resolution and helper idioms replace the
+  per-file copies that had drifted.
+- Trim reflection and allocation overhead in hot paths: bind the DidCreate delegate once,
+  probe previously-hit assemblies before scanning the AppDomain in FindType, cache composed
+  profiler keys, and drop per-state LINQ closures in the behaviour-container filter.
 
 ## 1.2.1 — 2026-07-11
 

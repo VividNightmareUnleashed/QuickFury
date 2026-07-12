@@ -90,7 +90,7 @@ versions or unexpected method signatures.
 
 ## Install
 
-Install VRCFury normally first. Then either import the `QuickFury-1.2.1.unitypackage` from the
+Install VRCFury normally first. Then either import the `QuickFury-1.2.2.unitypackage` from the
 release, or add `com.quickfury.addon/package.json` through Unity's Package Manager. A local
 manifest entry looks like this:
 
