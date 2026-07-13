@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.4 — 2026-07-13
+
+Align QuickFury's license and notices with VRCFury's commercial terms. No code or
+optimization changes; the compatibility target stays VRCFury 1.1363.0.
+
+- Drop license condition 5, which permitted bundling QuickFury inside a paid product.
+  VRCFury's commercial license has, since VRCFury 1.1351.0, prohibited patching VRCFury
+  through any third-party tool and prohibited bundling or directing users to one, so that
+  permission invited a commercial-license violation for commercial products.
+- Add a commercial-use notice to NOTICE.md and update the README license summary: using,
+  bundling, or directing others to QuickFury alongside VRCFury 1.1351.0 or later would
+  likely violate the VRCFury commercial license. Personal, non-commercial use is unaffected;
+  VRCFury's personal license permits modification.
+
 ## 1.2.3 — 2026-07-12
 
 Move the compatibility target to VRCFury 1.1363.0 and fix a save-phase failure in bakes

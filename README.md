@@ -90,7 +90,7 @@ versions or unexpected method signatures.
 
 ## Install
 
-Install VRCFury normally first. Then either import the `QuickFury-1.2.3.unitypackage` from the
+Install VRCFury normally first. Then either import the `QuickFury-1.2.4.unitypackage` from the
 release, or add `com.quickfury.addon/package.json` through Unity's Package Manager. A local
 manifest entry looks like this:
 
@@ -133,9 +133,8 @@ and [the performance report](com.quickfury.addon/PERFORMANCE.md) for methodology
 ## License
 
 QuickFury may be used, modified, forked, and redistributed for free with attribution, but it
-may not itself be sold or paywalled. It may be bundled within a paid product only with clear,
-visible credit and a link to this repository, and it may not be marketed as a paid
-creator-offered extra or premium addon. Reused code must also clearly credit QuickFury. See
+may not itself be sold, paywalled, or used to monetize access. Reused code must also clearly
+credit QuickFury. See
 [LICENSE.md](LICENSE.md) for the complete terms. QuickFury is independent of and is not
 endorsed by VRCFury; see the package
 [NOTICE.md](com.quickfury.addon/NOTICE.md).

@@ -8,5 +8,22 @@ installation that is already present in your project, at runtime, in memory only
 identical behavior, some of QuickFury's replacement code paths intentionally mirror the logic of
 the VRCFury internals they replace.
 
+## Commercial use of VRCFury
+
+Starting with **VRCFury 1.1351.0** (released 2026-07-07), the VRCFury commercial license prohibits
+modifying or patching VRCFury "through any third party, tool, plugin, script, build step, or
+service," and prohibits bundling, linking to, or instructing users toward any such tool for use
+with a product or service. QuickFury is exactly such a tool: it patches VRCFury in memory at
+runtime.
+
+If you use VRCFury under its **commercial** license — for example, to build or sell avatars for
+commercial purposes — then using, bundling, or directing others to QuickFury alongside VRCFury
+1.1351.0 or later would likely violate that license, which terminates automatically on any
+violation. Personal, non-commercial use is unaffected: VRCFury's personal license permits
+modification.
+
+Confirm which VRCFury version and license govern your use. This notice is informational and is not
+legal advice.
+
 VRCFury is (c) Senky — https://vrcfury.com — and is licensed under its own terms:
 https://github.com/VRCFury/VRCFury/blob/main/LICENSE.md

@@ -13,11 +13,6 @@ to the following conditions:
    endorsement by or official support from QuickFury, VRCFury, or their authors.
 4. Reuse of QuickFury source code in another project must clearly credit QuickFury and link to
    the official QuickFury repository.
-5. QuickFury may be bundled within a paid product only when the product gives QuickFury clear,
-   visible credit, links to the official QuickFury repository, and includes this license. It may
-   not be advertised, priced, paywalled, or marketed as a creator-offered extra, premium addon,
-   paid upgrade, or other benefit that the customer must pay to receive. No part of the product
-   price may be represented as payment for QuickFury.
 
 These restrictions apply to QuickFury itself, not to avatars or other content processed using
 QuickFury.
