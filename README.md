@@ -1,5 +1,12 @@
 # QuickFury
 
+> [!IMPORTANT]
+> **QuickFury has been superseded by [FuryPlusPlus](https://github.com/VividNightmareUnleashed/furyplusplus).**
+> FuryPlusPlus ports all 21 of QuickFury's validated speed patches and adds output-quality passes
+> (fewer animator layers, fewer synced parameter bits). QuickFury is no longer maintained and its
+> releases have been withdrawn. To migrate, remove `com.quickfury.addon` and install FuryPlusPlus —
+> the two must never run together, and settings do not carry over.
+
 QuickFury is an Editor-only, bolt-on performance layer for an existing VRCFury installation.
 It profiles VRCFury avatar bakes and replaces measured hot paths with indexed implementations.
 It does not ship, fork, or modify VRCFury.
@@ -90,9 +97,8 @@ versions or unexpected method signatures.
 
 ## Install
 
-Install VRCFury normally first. Then either import the `QuickFury-1.2.4.unitypackage` from the
-release, or add `com.quickfury.addon/package.json` through Unity's Package Manager. A local
-manifest entry looks like this:
+Install VRCFury normally first. Then add `com.quickfury.addon/package.json` through Unity's
+Package Manager. A local manifest entry looks like this:
 
 ```json
 "com.quickfury.addon": "file:C:/path/to/QuickFury/com.quickfury.addon"
